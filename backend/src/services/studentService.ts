@@ -1,0 +1,95 @@
+import { db } from '../db/knex.js';
+import * as lyceumClient from '../clients/lyceumClient.js';
+import { Student } from '../types/index.js';
+import { logger } from '../lib/logger.js';
+import { getAvailableBalance, getDailyConsumed } from './quotaService.js';
+
+interface FindOptions {
+  /**
+   * strict=true: Lyceum MUST return the student. If unreachable or not found → throws.
+   * strict=false (default): if Lyceum is unreachable, creates student in contingency.
+   *   A 404 from Lyceum always throws regardless of strict flag.
+   */
+  strict?: boolean;
+}
+
+export async function findOrCreateStudent(
+  registrationNumber: string,
+  options: FindOptions = {}
+): Promise<{
+  student: Student;
+  photo: string | null;
+  available_balance: number;
+  daily_consumed: number;
+  lyceum_active: boolean;
+}> {
+  const { strict = false } = options;
+
+  let lyceumData = null;
+  let lyceumAvailable = false;
+
+  try {
+    lyceumData = await lyceumClient.getStudentByRegistration(registrationNumber);
+    lyceumAvailable = true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+
+    // 404 = student genuinely not found in Lyceum → always reject
+    if (msg === 'STUDENT_NOT_FOUND') {
+      throw new Error('STUDENT_NOT_FOUND');
+    }
+
+    // API unreachable — check if student is already in our DB before deciding
+    logger.warn({ err, registrationNumber }, 'Lyceum unavailable');
+  }
+
+  let student = await db('students').where('registration_number', registrationNumber).first() as Student | undefined;
+
+  // Strict mode: block NEW students when Lyceum is unreachable (can't verify identity)
+  if (!lyceumAvailable && strict && !student) {
+    throw new Error('LYCEUM_UNAVAILABLE');
+  }
+
+  if (!student) {
+    const [inserted] = await db('students')
+      .insert({
+        registration_number: registrationNumber,
+        name: lyceumData?.nome_compl || registrationNumber,
+        course: lyceumData?.nome_curso || '',
+        period: lyceumData?.nome_serie || '',
+        person_code: lyceumData?.pessoa || null,
+        sync_status: lyceumAvailable ? 'synced' : 'pending',
+      })
+      .returning('*');
+    student = inserted as Student;
+  } else if (lyceumAvailable && lyceumData) {
+    const [updated] = await db('students')
+      .where('id', student.id)
+      .update({
+        name: lyceumData.nome_compl,
+        course: lyceumData.nome_curso,
+        period: lyceumData.nome_serie,
+        person_code: lyceumData.pessoa,
+        sync_status: 'synced',
+        updated_at: db.fn.now(),
+      })
+      .returning('*');
+    student = updated as Student;
+  }
+
+  let photo: string | null = null;
+  if (student.person_code) {
+    try {
+      photo = await lyceumClient.getStudentPhoto(student.person_code);
+    } catch {
+      // photo is non-critical
+    }
+  }
+
+  const [available_balance, daily_consumed] = await Promise.all([
+    getAvailableBalance(student.id),
+    getDailyConsumed(student.id),
+  ]);
+
+  return { student, photo, available_balance, daily_consumed, lyceum_active: lyceumAvailable };
+}

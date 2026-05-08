@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: paperprint-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: paperprint-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      # Ignora verificação de certificado SSL para serviços internos com cert auto-assinado
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    volumes:
+      - ./backend/src:/app/src
+    # Permite que o container resolva hostnames da rede interna (ex.: Situator).
+    # Se o hostname não resolver automaticamente, defina SITUATOR_IP no .env.
+    extra_hosts:
+      - "${SITUATOR_HOSTNAME:-network-services-middleware-situator.intranet.local}:${SITUATOR_IP:-0.0.0.0}"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: paperprint-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file: .env
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend/src:/app/src
+
+volumes:
+  postgres_data:

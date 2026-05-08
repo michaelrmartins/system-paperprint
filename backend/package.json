@@ -1,0 +1,29 @@
+{
+  "name": "paperprint-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "migrate": "tsx src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/jwt": "^8.0.1",
+    "argon2": "^0.31.2",
+    "fastify": "^4.26.2",
+    "knex": "^3.1.0",
+    "pg": "^8.11.5",
+    "pino": "^9.1.0",
+    "pino-pretty": "^11.0.0",
+    "zod": "^3.23.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@types/pg": "^8.11.5",
+    "tsx": "^4.8.2",
+    "typescript": "^5.4.5"
+  }
+}
