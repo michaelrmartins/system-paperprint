@@ -22,7 +22,8 @@ export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
   if (!user) return <Navigate to="/login" replace />;
 
   if (roles && !roles.includes(user.role)) {
-    return <Navigate to="/" replace />;
+    const fallback = user.role === 'auditor' ? '/reports' : '/today';
+    return <Navigate to={fallback} replace />;
   }
 
   return <>{children}</>;

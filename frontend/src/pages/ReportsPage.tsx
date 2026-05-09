@@ -10,12 +10,13 @@ import { AuditEntry } from '../types';
 import { Search, ChevronRight, ChevronDown } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit';
+type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'daily' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit';
 
 interface CourseRow    { course: string; total_sheets: string }
 interface PeriodRow    { period: string; total_sheets: string }
 interface TopRow       { id: number; name: string; registration_number: string; course: string; period: string; total_sheets: string }
 interface MonthlyRow   { month: number; total_sheets: string; total_operations: string }
+interface DailyRow     { day: string; total_sheets: string; total_operations: string }
 interface HourRow      { hour: number; total_operations: number; total_sheets: number }
 interface OperatorRow  { operator: string; total_operations: string; total_sheets: string }
 interface LoanTypeRow        { type: 'own' | 'borrowed'; total_sheets: string; total_operations: string }
@@ -100,6 +101,7 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
 export function ReportsPage() {
   const [tab, setTab] = useState<ReportTab>('course');
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [data, setData] = useState<unknown[]>([]);
   const [start, setStart] = useState('');
   const [end, setEnd]     = useState('');
@@ -127,6 +129,7 @@ export function ReportsPage() {
   const load = async () => {
     if (tab === 'history') return;
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams();
       if (tab === 'monthly') { params.set('year', year); }
@@ -135,14 +138,17 @@ export function ReportsPage() {
       const ep: Record<string, string> = {
         course: '/reports/by-course', period: '/reports/by-period',
         top: '/reports/top-students', monthly: '/reports/monthly',
+        daily: '/reports/daily',
         hours: '/reports/by-hour', operator: '/reports/by-operator',
         'loan-type': '/reports/own-vs-borrowed', 'identify-method': '/reports/by-identify-method',
-      audit: '/reports/audit',
+        audit: '/reports/audit',
       };
       const res = await api.get<unknown[]>(`${ep[tab]}?${params}`);
       setData(res.data);
       setExpandedPeriods(new Set());
       setPeriodStudents({});
+    } catch {
+      setLoadError('Não foi possível carregar os dados. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -150,6 +156,7 @@ export function ReportsPage() {
 
   useEffect(() => {
     setData([]);
+    setLoadError('');
     setExpandedPeriods(new Set());
     setPeriodStudents({});
     if (tab !== 'history') load();
@@ -209,16 +216,17 @@ export function ReportsPage() {
   };
 
   const tabs: { key: ReportTab; label: string }[] = [
-    { key: 'course',     label: 'Por Curso' },
-    { key: 'period',     label: 'Por Período' },
-    { key: 'top',        label: 'Top Alunos' },
-    { key: 'monthly',    label: 'Mensal' },
-    { key: 'hours',      label: 'Horários de Pico' },
-    { key: 'operator',   label: 'Por Operador' },
+    { key: 'course',          label: 'Por Curso' },
+    { key: 'period',          label: 'Por Período' },
+    { key: 'top',             label: 'Top Alunos' },
+    { key: 'monthly',         label: 'Mensal' },
+    { key: 'daily',           label: 'Diário' },
+    { key: 'hours',           label: 'Horários de Pico' },
+    { key: 'operator',        label: 'Por Operador' },
     { key: 'loan-type',       label: 'Próprias vs Emp.' },
     { key: 'identify-method', label: 'Identificação' },
     { key: 'history',         label: 'Histórico' },
-    { key: 'audit',      label: 'Auditoria' },
+    { key: 'audit',           label: 'Auditoria' },
   ];
 
   const noData = !loading && data.length === 0 && tab !== 'history' && tab !== 'hours';
@@ -256,7 +264,8 @@ export function ReportsPage() {
       )}
 
       {loading && <div className="flex justify-center py-12"><Spinner /></div>}
-      {noData && <p className="text-center text-[14px] text-gray-400 py-12">Sem dados para o período.</p>}
+      {loadError && <p className="text-center text-[14px] text-red-500 py-12">{loadError}</p>}
+      {noData && !loadError && <p className="text-center text-[14px] text-gray-400 py-12">Sem dados para o período.</p>}
 
       {/* ── History ── */}
       {tab === 'history' && (
@@ -445,6 +454,49 @@ export function ReportsPage() {
                     </tr>
                   ))}
                 </tbody>
+              </table>
+            </TableWrap>
+          </div>
+        );
+      })()}
+
+      {/* ── Daily ── */}
+      {!loading && tab === 'daily' && data.length > 0 && (() => {
+        const rows = data as DailyRow[];
+        const fmt = (d: string) => { const s = String(d ?? '').slice(0, 10); const [y, m, dd] = s.split('-'); return dd ? `${dd}/${m}/${y.slice(2)}` : s; };
+        return (
+          <div className="space-y-4">
+            <Card>
+              <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-3">Folhas por dia</p>
+              <ReactECharts
+                option={vBar(rows.map(r => fmt(r.day)), rows.map(r => parseInt(r.total_sheets)), 'Folhas')}
+                style={{ height: '220px' }}
+                opts={{ renderer: 'svg' }}
+              />
+            </Card>
+            <TableWrap>
+              <table className="w-full text-[13px]">
+                <thead className="bg-gray-50/80 border-b border-gray-100">
+                  <tr><Th>Data</Th><Th right>Operações</Th><Th right>Folhas</Th></tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100/80">
+                  {rows.map(r => (
+                    <tr key={r.day} className="hover:bg-gray-50/40">
+                      <td className="px-5 py-3 font-medium text-gray-800">{fmt(r.day)}</td>
+                      <td className="px-5 py-3 text-right text-gray-600">{r.total_operations}</td>
+                      <td className="px-5 py-3 text-right font-bold text-gray-900">{r.total_sheets}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-gray-200 bg-gray-50/60">
+                  <tr>
+                    <td className="px-5 py-3 text-[13px] text-gray-500">
+                      {rows.length} dia{rows.length !== 1 ? 's' : ''}
+                    </td>
+                    <td className="px-5 py-3 text-right font-bold">{rows.reduce((a, r) => a + parseInt(r.total_operations), 0)}</td>
+                    <td className="px-5 py-3 text-right font-bold">{rows.reduce((a, r) => a + parseInt(r.total_sheets), 0)}</td>
+                  </tr>
+                </tfoot>
               </table>
             </TableWrap>
           </div>

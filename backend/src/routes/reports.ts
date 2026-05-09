@@ -83,7 +83,13 @@ export async function reportRoutes(app: FastifyInstance) {
         if (end) q.where('audit_log.created_at', '<=', end);
       })
       .select(
-        'audit_log.*',
+        'audit_log.id',
+        'audit_log.entry_id',
+        'audit_log.operator_id',
+        'audit_log.previous_value',
+        'audit_log.new_value',
+        'audit_log.reason',
+        db.raw(`to_char(audit_log.created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') as created_at`),
         'system_users.login as operator_login',
         'students.name as student_name',
         'students.registration_number'
@@ -164,6 +170,24 @@ export async function reportRoutes(app: FastifyInstance) {
         db.raw('SUM(total_sheets) as total_sheets'),
       )
       .orderBy('total_operations', 'desc');
+  });
+
+  // Daily evolution
+  app.get('/reports/daily', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+    const { start, end } = req.query as { start?: string; end?: string };
+    return db('entries')
+      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+      .modify((q) => {
+        if (start) q.where('print_operations.created_at', '>=', start);
+        if (end) q.where('print_operations.created_at', '<=', `${end}T23:59:59`);
+      })
+      .groupByRaw(`DATE(print_operations.created_at AT TIME ZONE 'America/Sao_Paulo')`)
+      .select(
+        db.raw(`DATE(print_operations.created_at AT TIME ZONE 'America/Sao_Paulo')::text as day`),
+        db.raw('SUM(entries.sheets) as total_sheets'),
+        db.raw('COUNT(DISTINCT entries.print_operation_id) as total_operations'),
+      )
+      .orderBy('day');
   });
 
   // Students within a period (for expandable rows)

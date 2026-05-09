@@ -12,13 +12,16 @@ export async function studentRoutes(app: FastifyInstance) {
   // Identify by manual registration number — contingency allowed when Lyceum is down
   app.post('/students/identify/manual', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const { registration_number } = req.body as { registration_number: string };
+    const { force } = req.query as { force?: string };
     if (!registration_number?.trim()) {
       return reply.status(400).send({ error: 'MISSING_REGISTRATION_NUMBER' });
     }
+    const reg = registration_number.trim();
     try {
-      return await findOrCreateStudent(registration_number.trim(), { strict: false });
+      return await findOrCreateStudent(reg, { strict: false, force: force === 'true' });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
+      if (msg === 'STUDENT_NOT_IN_LYCEUM') return reply.status(422).send({ error: 'STUDENT_NOT_IN_LYCEUM', registration_number: reg });
       if (msg === 'STUDENT_NOT_FOUND') return reply.status(404).send({ error: 'STUDENT_NOT_FOUND' });
       throw err;
     }
@@ -27,6 +30,7 @@ export async function studentRoutes(app: FastifyInstance) {
   // Identify by RFID card hex — contingency allowed
   app.post('/students/identify/rfid', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const { card_hex } = req.body as { card_hex: string };
+    const { force } = req.query as { force?: string };
     if (!card_hex?.trim()) return reply.status(400).send({ error: 'MISSING_CARD_HEX' });
 
     let person;
@@ -44,9 +48,10 @@ export async function studentRoutes(app: FastifyInstance) {
     if (!person.Document) return reply.status(422).send({ error: 'DOCUMENT_NOT_FOUND' });
 
     try {
-      return await findOrCreateStudent(person.Document, { strict: false });
+      return await findOrCreateStudent(person.Document, { strict: false, force: force === 'true' });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
+      if (msg === 'STUDENT_NOT_IN_LYCEUM') return reply.status(422).send({ error: 'STUDENT_NOT_IN_LYCEUM', registration_number: person.Document });
       if (msg === 'STUDENT_NOT_FOUND') return reply.status(404).send({ error: 'STUDENT_NOT_FOUND' });
       throw err;
     }
@@ -55,6 +60,7 @@ export async function studentRoutes(app: FastifyInstance) {
   // Identify by facial recognition — contingency allowed
   app.post('/students/identify/facial', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const { image } = req.body as { image: string };
+    const { force } = req.query as { force?: string };
     if (!image) return reply.status(400).send({ error: 'MISSING_IMAGE' });
 
     let recognition;
@@ -67,10 +73,11 @@ export async function studentRoutes(app: FastifyInstance) {
     if (!recognition) return reply.status(422).send({ error: 'FACE_NOT_RECOGNIZED' });
 
     try {
-      const result = await findOrCreateStudent(recognition.matricula, { strict: false });
+      const result = await findOrCreateStudent(recognition.matricula, { strict: false, force: force === 'true' });
       return { ...result, confidence: recognition.confidence };
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
+      if (msg === 'STUDENT_NOT_IN_LYCEUM') return reply.status(422).send({ error: 'STUDENT_NOT_IN_LYCEUM', registration_number: recognition.matricula });
       if (msg === 'STUDENT_NOT_FOUND') return reply.status(404).send({ error: 'STUDENT_NOT_FOUND' });
       throw err;
     }
@@ -135,7 +142,7 @@ export async function studentRoutes(app: FastifyInstance) {
       period: r.period,
       quota_used: parseInt(r.quota_used),
       sheets_lent: parseInt(r.sheets_lent) || 0,
-      total_printed: primaryMap.get(r.id) ?? parseInt(r.quota_used),
+      total_printed: primaryMap.get(r.id) ?? 0,
       gave_loans: (parseInt(r.sheets_lent) || 0) > 0,
       received_loans: receivedLoanIds.has(r.id),
       last_operation_at: r.last_operation_at,

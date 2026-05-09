@@ -98,7 +98,7 @@ export function TodayPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [studentDetail, setStudentDetail] = useState<IdentifyResult | null>(null);
   const [fullHistory, setFullHistory] = useState<FullHistory | null>(null);
-  const todayDate = new Date().toISOString().slice(0, 10);
+  const todayDate = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 
   useEffect(() => {
     api.get<TodayStudent[]>('/students/today')

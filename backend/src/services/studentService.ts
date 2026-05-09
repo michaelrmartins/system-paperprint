@@ -8,9 +8,13 @@ interface FindOptions {
   /**
    * strict=true: Lyceum MUST return the student. If unreachable or not found → throws.
    * strict=false (default): if Lyceum is unreachable, creates student in contingency.
-   *   A 404 from Lyceum always throws regardless of strict flag.
    */
   strict?: boolean;
+  /**
+   * force=true: when Lyceum is available but returns 404, proceed in contingency
+   * instead of throwing STUDENT_NOT_IN_LYCEUM. Requires explicit operator confirmation.
+   */
+  force?: boolean;
 }
 
 export async function findOrCreateStudent(
@@ -34,13 +38,15 @@ export async function findOrCreateStudent(
   } catch (err) {
     const msg = err instanceof Error ? err.message : '';
 
-    // 404 = student genuinely not found in Lyceum → always reject
+    // 404 = student not found in Lyceum
     if (msg === 'STUDENT_NOT_FOUND') {
-      throw new Error('STUDENT_NOT_FOUND');
+      if (!options.force) throw new Error('STUDENT_NOT_IN_LYCEUM');
+      // force=true: proceed in contingency even though Lyceum is reachable
+      logger.warn({ registrationNumber }, 'Student not in Lyceum — proceeding in contingency (forced)');
+    } else {
+      // API unreachable — check if student is already in our DB before deciding
+      logger.warn({ err, registrationNumber }, 'Lyceum unavailable');
     }
-
-    // API unreachable — check if student is already in our DB before deciding
-    logger.warn({ err, registrationNumber }, 'Lyceum unavailable');
   }
 
   let student = await db('students').where('registration_number', registrationNumber).first() as Student | undefined;

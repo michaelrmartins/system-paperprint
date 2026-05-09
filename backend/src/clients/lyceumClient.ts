@@ -54,9 +54,12 @@ function maybeHexToBase64(value: string): string {
 
 export async function isAvailable(): Promise<boolean> {
   try {
-    await fetchJson(`${BASE_URL}/health`);
-    return true;
-  } catch {
+    await fetchJson(`${BASE_URL}/alunos/2020202020`);
+    return true; // unexpected 2xx
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    // 404 = API is reachable but student not found → available
+    if (msg === 'STUDENT_NOT_FOUND') return true;
     logger.warn('Lyceum API unavailable');
     return false;
   }

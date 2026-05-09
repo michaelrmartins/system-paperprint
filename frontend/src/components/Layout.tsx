@@ -1,9 +1,43 @@
-import { ReactNode } from 'react';
+import { ReactNode, useState, useEffect, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { Printer, List, BarChart2, Settings, FileEdit, LogOut } from 'lucide-react';
 import { ROLE_LABELS } from '../lib/format';
 import { PrinterWidget } from './PrinterWidget';
+import api from '../lib/api';
+
+function LyceumStatus() {
+  const [available, setAvailable] = useState<boolean | null>(null);
+
+  const check = useCallback(async () => {
+    try {
+      const res = await api.get<{ available: boolean }>('/health/lyceum');
+      setAvailable(res.data.available);
+    } catch {
+      setAvailable(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    check();
+    const id = setInterval(check, 30_000);
+    return () => clearInterval(id);
+  }, [check]);
+
+  if (available === null) return null;
+
+  return (
+    <div
+      className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl cursor-default"
+      title={available ? 'Lyceum disponível' : 'Sistema em modo de Contingência'}
+    >
+      <span className={`shrink-0 w-2 h-2 rounded-full ${available ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+      <span className={`text-[11px] font-medium ${available ? 'text-gray-400' : 'text-amber-600'}`}>
+        Lyceum
+      </span>
+    </div>
+  );
+}
 
 interface NavItem {
   to: string;
@@ -87,6 +121,7 @@ export function Layout({ children }: { children: ReactNode }) {
               ))}
             </ul>
             <PrinterWidget />
+            <LyceumStatus />
           </div>
         </nav>
 

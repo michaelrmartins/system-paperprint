@@ -11,6 +11,8 @@ import { settingsRoutes } from './routes/settings.js';
 import { reportRoutes } from './routes/reports.js';
 import { systemUserRoutes } from './routes/systemUsers.js';
 import { zabbixRoutes } from './routes/zabbix.js';
+import * as lyceumClient from './clients/lyceumClient.js';
+import { requireAuth } from './middleware/auth.js';
 
 const app = Fastify({ logger: logger as never });
 
@@ -32,6 +34,10 @@ await app.register(systemUserRoutes);
 await app.register(zabbixRoutes);
 
 app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+app.get('/health/lyceum', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async () => {
+  const available = await lyceumClient.isAvailable();
+  return { available };
+});
 
 try {
   await runMigrations();

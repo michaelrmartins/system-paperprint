@@ -22,6 +22,12 @@ function onlyNumbers(value: string): string {
   return value.replace(/\D/g, '');
 }
 
+function getNotInLyceumReg(err: unknown): string | null {
+  const data = (err as { response?: { data?: { error?: string; registration_number?: string } } })?.response?.data;
+  if (data?.error === 'STUDENT_NOT_IN_LYCEUM') return data.registration_number ?? '';
+  return null;
+}
+
 export function PrintFlowPage() {
   const [step, setStep] = useState<Step>('identify');
   const [identifyMethod, setIdentifyMethod] = useState<IdentifyMethod>('manual');
@@ -41,6 +47,7 @@ export function PrintFlowPage() {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [doneOperationId, setDoneOperationId] = useState<number | null>(null);
   const [errorModal, setErrorModal] = useState('');
+  const [notInLyceumModal, setNotInLyceumModal] = useState<{ registration_number: string; confirm: () => void } | null>(null);
 
   const [addingLoan, setAddingLoan] = useState(false);
   const [loanIdentifyMethod, setLoanIdentifyMethod] = useState<IdentifyMethod>('manual');
@@ -48,6 +55,7 @@ export function PrintFlowPage() {
   const [loanCardHex, setLoanCardHex] = useState('');
   const [loanLoading, setLoanLoading] = useState(false);
   const [loanError, setLoanError] = useState('');
+  const [loanAddedMsg, setLoanAddedMsg] = useState('');
 
   // Camera state
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -126,7 +134,7 @@ export function PrintFlowPage() {
     }
   }, [selectedCameraId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const captureAndRecognize = useCallback(async () => {
+  const captureAndRecognize = useCallback(async (force = false) => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth;
@@ -137,49 +145,74 @@ export function PrintFlowPage() {
     setIdentifying(true);
     setIdentifyError('');
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/facial', { image });
+      const res = await api.post<IdentifyResult>(
+        '/students/identify/facial',
+        { image },
+        force ? { params: { force: 'true' } } : undefined,
+      );
       stopCamera();
       setIdentifyResult(res.data);
       setIdentifyMethodUsed('facial');
       setStep('sheets');
     } catch (err) {
+      const reg = getNotInLyceumReg(err);
+      if (reg !== null) {
+        setNotInLyceumModal({ registration_number: reg, confirm: () => captureAndRecognize(true) });
+        return;
+      }
       setIdentifyError(extractApiError(err));
     } finally {
       setIdentifying(false);
     }
-  }, [stopCamera]);
+  }, [stopCamera]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const identifyByManual = async () => {
+  const identifyByManual = async (force = false) => {
     if (!registration.trim()) return;
     setIdentifying(true);
     setIdentifyError('');
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/manual', {
-        registration_number: registration.trim(),
-      });
+      const res = await api.post<IdentifyResult>(
+        '/students/identify/manual',
+        { registration_number: registration.trim() },
+        force ? { params: { force: 'true' } } : undefined,
+      );
       setIdentifyResult(res.data);
       setIdentifyMethodUsed('manual');
       setStep('sheets');
     } catch (err) {
+      const reg = getNotInLyceumReg(err);
+      if (reg !== null) {
+        setNotInLyceumModal({ registration_number: reg, confirm: () => identifyByManual(true) });
+        return;
+      }
       setIdentifyError(extractApiError(err));
     } finally {
       setIdentifying(false);
     }
   };
 
-  const identifyByRFID = async (hex: string) => {
+  const identifyByRFID = async (hex: string, force = false) => {
     setIdentifying(true);
     setIdentifyError('');
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/rfid', { card_hex: hex });
+      const res = await api.post<IdentifyResult>(
+        '/students/identify/rfid',
+        { card_hex: hex },
+        force ? { params: { force: 'true' } } : undefined,
+      );
       setIdentifyResult(res.data);
       setIdentifyMethodUsed('rfid');
       setStep('sheets');
     } catch (err) {
+      const reg = getNotInLyceumReg(err);
+      if (reg !== null) {
+        setNotInLyceumModal({ registration_number: reg, confirm: () => identifyByRFID(hex, true) });
+        return;
+      }
       setIdentifyError(extractApiError(err));
     } finally {
       setIdentifying(false);
-      setCardHex('');
+      if (!force) setCardHex('');
     }
   };
 
@@ -211,12 +244,14 @@ export function PrintFlowPage() {
     setLoanCardHex('');
     setLoanIdentifyMethod('manual');
     setLoanError('');
+    setLoanAddedMsg('');
     stopCamera();
   };
 
   const switchLoanMethod = (method: IdentifyMethod) => {
     setLoanIdentifyMethod(method);
     setLoanError('');
+    setLoanAddedMsg('');
     if (method !== 'facial') stopCamera();
   };
 
@@ -229,41 +264,76 @@ export function PrintFlowPage() {
       setErrorModal('Esta matrícula já foi adicionada como emprestadora.');
       return false;
     }
-    setLoanStudents((prev) => [...prev, { identify_result: result, identify_method: method }]);
+
+    const newLoanStudents = [...loanStudents, { identify_result: result, identify_method: method }];
+    setLoanStudents(newLoanStudents);
+
+    const sheetsNeeded = parseInt(sheets) || 0;
+    const primaryBalance = identifyResult?.available_balance ?? 0;
+    const totalAvailable = primaryBalance + newLoanStudents.reduce((sum, l) => sum + l.identify_result.available_balance, 0);
+    const remaining = sheetsNeeded > 0 ? Math.max(0, sheetsNeeded - totalAvailable) : 0;
+
+    if (remaining > 0) {
+      setLoanRegistration('');
+      setLoanCardHex('');
+      setLoanError('');
+      stopCamera();
+      setLoanAddedMsg(
+        `✓ ${result.student.name} adicionado (+${result.available_balance} folha${result.available_balance !== 1 ? 's' : ''}). Ainda faltam ${remaining} folha${remaining !== 1 ? 's' : ''}.`
+      );
+      return true;
+    }
+
     closeLoanModal();
     return true;
   };
 
-  const addLoanByManual = async () => {
+  const addLoanByManual = async (force = false) => {
     if (!loanRegistration.trim()) return;
     setLoanLoading(true);
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/manual', {
-        registration_number: loanRegistration.trim(),
-      });
+      const res = await api.post<IdentifyResult>(
+        '/students/identify/manual',
+        { registration_number: loanRegistration.trim() },
+        force ? { params: { force: 'true' } } : undefined,
+      );
       validateAndAddLoanStudent(res.data, 'manual');
     } catch (err) {
+      const reg = getNotInLyceumReg(err);
+      if (reg !== null) {
+        setNotInLyceumModal({ registration_number: reg, confirm: () => addLoanByManual(true) });
+        return;
+      }
       setErrorModal(extractApiError(err));
     } finally {
       setLoanLoading(false);
     }
   };
 
-  const addLoanByRFID = async () => {
+  const addLoanByRFID = async (force = false) => {
     if (!loanCardHex.trim()) return;
     setLoanLoading(true);
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/rfid', { card_hex: loanCardHex.trim() });
+      const res = await api.post<IdentifyResult>(
+        '/students/identify/rfid',
+        { card_hex: loanCardHex.trim() },
+        force ? { params: { force: 'true' } } : undefined,
+      );
       validateAndAddLoanStudent(res.data, 'rfid');
     } catch (err) {
+      const reg = getNotInLyceumReg(err);
+      if (reg !== null) {
+        setNotInLyceumModal({ registration_number: reg, confirm: () => addLoanByRFID(true) });
+        return;
+      }
       setErrorModal(extractApiError(err));
     } finally {
       setLoanLoading(false);
-      setLoanCardHex('');
+      if (!force) setLoanCardHex('');
     }
   };
 
-  const addLoanByFacial = async () => {
+  const addLoanByFacial = async (force = false) => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth;
@@ -272,9 +342,18 @@ export function PrintFlowPage() {
     const image = canvas.toDataURL('image/jpeg', 0.8);
     setLoanLoading(true);
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/facial', { image });
+      const res = await api.post<IdentifyResult>(
+        '/students/identify/facial',
+        { image },
+        force ? { params: { force: 'true' } } : undefined,
+      );
       validateAndAddLoanStudent(res.data, 'facial');
     } catch (err) {
+      const reg = getNotInLyceumReg(err);
+      if (reg !== null) {
+        setNotInLyceumModal({ registration_number: reg, confirm: () => addLoanByFacial(true) });
+        return;
+      }
       setErrorModal(extractApiError(err));
     } finally {
       setLoanLoading(false);
@@ -370,7 +449,7 @@ export function PrintFlowPage() {
                 inputMode="numeric"
                 pattern="[0-9]*"
               />
-              <Button onClick={identifyByManual} loading={identifying} className="w-full justify-center">
+              <Button onClick={() => identifyByManual()} loading={identifying} className="w-full justify-center">
                 Identificar <ChevronRight size={15} />
               </Button>
             </div>
@@ -440,7 +519,7 @@ export function PrintFlowPage() {
               </div>
 
               <Button
-                onClick={captureAndRecognize}
+                onClick={() => captureAndRecognize()}
                 loading={identifying}
                 disabled={!cameraActive}
                 className="w-full justify-center"
@@ -509,6 +588,23 @@ export function PrintFlowPage() {
                 ))}
               </div>
             )}
+
+            {(() => {
+              const needed = parseInt(sheets) || 0;
+              if (needed <= 0) return null;
+              const totalAvailable = (identifyResult?.available_balance ?? 0) + loanStudents.reduce((s, l) => s + l.identify_result.available_balance, 0);
+              const shortage = Math.max(0, needed - totalAvailable);
+              if (shortage > 0) return (
+                <p className="mt-3 text-[13px] text-amber-600">
+                  Faltam <strong>{shortage}</strong> folha{shortage !== 1 ? 's' : ''} — adicione matrículas emprestadoras.
+                </p>
+              );
+              return (
+                <p className="mt-3 text-[13px] text-emerald-600 font-medium">
+                  ✓ Saldo suficiente para esta operação.
+                </p>
+              );
+            })()}
 
             <button
               onClick={() => setAddingLoan(true)}
@@ -614,9 +710,16 @@ export function PrintFlowPage() {
         title="Adicionar Emprestador"
         size="sm"
       >
-        <p className="text-[13px] text-gray-500 mb-4">
-          O emprestador deve estar fisicamente presente.
-        </p>
+        {loanAddedMsg ? (
+          <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+            <p className="text-[13px] text-emerald-700 font-medium">{loanAddedMsg}</p>
+            <p className="text-[12px] text-gray-500 mt-1">Identifique o próximo emprestador.</p>
+          </div>
+        ) : (
+          <p className="text-[13px] text-gray-500 mb-4">
+            O emprestador deve estar fisicamente presente.
+          </p>
+        )}
 
         {/* Method tabs */}
         <div className="flex gap-1 p-1 bg-gray-100/80 rounded-xl mb-4">
@@ -646,7 +749,7 @@ export function PrintFlowPage() {
             <Input
               label="Matrícula do emprestador"
               value={loanRegistration}
-              onChange={(e) => setLoanRegistration(onlyNumbers(e.target.value))}
+              onChange={(e) => { setLoanAddedMsg(''); setLoanRegistration(onlyNumbers(e.target.value)); }}
               onKeyDown={(e) => e.key === 'Enter' && addLoanByManual()}
               placeholder="Somente números"
               inputMode="numeric"
@@ -655,7 +758,7 @@ export function PrintFlowPage() {
             />
             <div className="flex gap-2 mt-4">
               <Button variant="secondary" onClick={closeLoanModal} size="sm">Cancelar</Button>
-              <Button onClick={addLoanByManual} loading={loanLoading} className="flex-1 justify-center" size="sm">
+              <Button onClick={() => addLoanByManual()} loading={loanLoading} className="flex-1 justify-center" size="sm">
                 Adicionar
               </Button>
             </div>
@@ -674,7 +777,7 @@ export function PrintFlowPage() {
             <input
               type="text"
               value={loanCardHex}
-              onChange={(e) => setLoanCardHex(e.target.value)}
+              onChange={(e) => { setLoanAddedMsg(''); setLoanCardHex(e.target.value); }}
               onKeyDown={(e) => e.key === 'Enter' && loanCardHex && addLoanByRFID()}
               placeholder="Código do cartão (hex)"
               className="w-full px-3 py-2 text-[14px] border border-gray-200 rounded-xl outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
@@ -682,7 +785,7 @@ export function PrintFlowPage() {
             />
             <div className="flex gap-2 mt-4">
               <Button variant="secondary" onClick={closeLoanModal} size="sm">Cancelar</Button>
-              <Button onClick={addLoanByRFID} loading={loanLoading} disabled={!loanCardHex} className="flex-1 justify-center" size="sm">
+              <Button onClick={() => addLoanByRFID()} loading={loanLoading} disabled={!loanCardHex} className="flex-1 justify-center" size="sm">
                 Adicionar
               </Button>
             </div>
@@ -722,7 +825,7 @@ export function PrintFlowPage() {
             {loanError && <p className="text-[12px] text-red-500 mb-2">{loanError}</p>}
             <div className="flex gap-2 mt-3">
               <Button variant="secondary" onClick={closeLoanModal} size="sm">Cancelar</Button>
-              <Button onClick={addLoanByFacial} loading={loanLoading} disabled={!cameraActive} className="flex-1 justify-center" size="sm">
+              <Button onClick={() => addLoanByFacial()} loading={loanLoading} disabled={!cameraActive} className="flex-1 justify-center" size="sm">
                 <Camera size={14} />
                 Capturar e Adicionar
               </Button>
@@ -744,6 +847,37 @@ export function PrintFlowPage() {
         <Button onClick={() => setErrorModal('')} className="mt-4 w-full justify-center" size="sm">
           Fechar
         </Button>
+      </Modal>
+
+      {/* ── Not in Lyceum confirmation modal ── */}
+      <Modal
+        open={!!notInLyceumModal}
+        onClose={() => setNotInLyceumModal(null)}
+        title="Matrícula não encontrada no Lyceum"
+        size="sm"
+      >
+        <p className="text-[14px] text-gray-700">
+          A matrícula <strong>{notInLyceumModal?.registration_number}</strong> não foi encontrada no Lyceum.
+        </p>
+        <p className="text-[13px] text-gray-500 mt-1">
+          Deseja prosseguir mesmo assim? O registro será criado em modo de contingência.
+        </p>
+        <div className="flex gap-2 mt-5">
+          <Button variant="secondary" onClick={() => setNotInLyceumModal(null)} size="sm">
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              const action = notInLyceumModal?.confirm;
+              setNotInLyceumModal(null);
+              action?.();
+            }}
+            className="flex-1 justify-center"
+            size="sm"
+          >
+            Prosseguir assim mesmo
+          </Button>
+        </div>
       </Modal>
     </div>
   );
