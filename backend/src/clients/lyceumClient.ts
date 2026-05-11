@@ -9,7 +9,8 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     throw new Error('STUDENT_NOT_FOUND');
   }
   if (!res.ok) {
-    throw new Error(`LYCEUM_HTTP_${res.status}`);
+    // 502 = upstream error, 503 = upstream offline, 504 = timeout
+    throw new Error('LYCEUM_UNAVAILABLE');
   }
   return res.json() as Promise<T>;
 }

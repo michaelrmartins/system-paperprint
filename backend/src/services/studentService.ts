@@ -30,29 +30,33 @@ export async function findOrCreateStudent(
   const { strict = false } = options;
 
   let lyceumData = null;
-  let lyceumAvailable = false;
+  // lyceumOnline: Lyceum middleware responded (even if student not found — 404 counts as online)
+  let lyceumOnline = false;
+  // lyceumSynced: we actually received student data from Lyceum
+  let lyceumSynced = false;
 
   try {
     lyceumData = await lyceumClient.getStudentByRegistration(registrationNumber);
-    lyceumAvailable = true;
+    lyceumOnline = true;
+    lyceumSynced = true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : '';
 
-    // 404 = student not found in Lyceum
     if (msg === 'STUDENT_NOT_FOUND') {
+      // 404 — API is reachable, student simply doesn't exist in Lyceum
+      lyceumOnline = true;
       if (!options.force) throw new Error('STUDENT_NOT_IN_LYCEUM');
-      // force=true: proceed in contingency even though Lyceum is reachable
       logger.warn({ registrationNumber }, 'Student not in Lyceum — proceeding in contingency (forced)');
     } else {
-      // API unreachable — check if student is already in our DB before deciding
+      // 502/503/504 or network error — middleware/upstream is unreachable
       logger.warn({ err, registrationNumber }, 'Lyceum unavailable');
     }
   }
 
   let student = await db('students').where('registration_number', registrationNumber).first() as Student | undefined;
 
-  // Strict mode: block NEW students when Lyceum is unreachable (can't verify identity)
-  if (!lyceumAvailable && strict && !student) {
+  // Strict mode: block NEW students only when Lyceum is truly unreachable (not just "student not found")
+  if (!lyceumOnline && strict && !student) {
     throw new Error('LYCEUM_UNAVAILABLE');
   }
 
@@ -64,11 +68,13 @@ export async function findOrCreateStudent(
         course: lyceumData?.nome_curso || '',
         period: lyceumData?.nome_serie || '',
         person_code: lyceumData?.pessoa || null,
-        sync_status: lyceumAvailable ? 'synced' : 'pending',
+        // 'synced' = Lyceum confirmed, 'attention' = Lyceum online but student not found (forced),
+        // 'pending' = Lyceum was offline, will sync when it comes back
+        sync_status: lyceumSynced ? 'synced' : lyceumOnline ? 'attention' : 'pending',
       })
       .returning('*');
     student = inserted as Student;
-  } else if (lyceumAvailable && lyceumData) {
+  } else if (lyceumSynced && lyceumData) {
     const [updated] = await db('students')
       .where('id', student.id)
       .update({
@@ -97,5 +103,5 @@ export async function findOrCreateStudent(
     getDailyConsumed(student.id),
   ]);
 
-  return { student, photo, available_balance, daily_consumed, lyceum_active: lyceumAvailable };
+  return { student, photo, available_balance, daily_consumed, lyceum_active: lyceumOnline };
 }
