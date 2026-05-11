@@ -19,28 +19,36 @@ export async function recognizeFace(imageBase64: string): Promise<VectorAIResult
   }
 
   const raw = await res.json() as Record<string, unknown>;
-
   const match = raw['match'];
 
-  // match=false/null/undefined/empty = not recognized
-  if (!match) return null;
+  // Extract box if provided by the API
+  const rawBox = raw['box'];
+  const box = (rawBox && typeof rawBox === 'object')
+    ? (rawBox as VectorAIResult['box'])
+    : null;
 
-  // The registration number and confidence are embedded in the message field.
-  // Expected format: "2024102020 (Name) | Tipo: 2 | Confiança: 0.9579"
+  // match=false/null/undefined = face not recognized
+  if (!match) {
+    // If box is present, a face was detected but not in the database
+    return box ? { matricula: null, confidence: 0, box } : null;
+  }
+
   const message = String(raw['message'] ?? '');
 
-  // Extract the first numeric sequence as the registration number
-  const regMatch = message.match(/^(\d+)/);
-  const matricula = regMatch ? regMatch[1] : null;
-
-  if (!matricula) return null;
-
-  // Extract confidence from message, fallback to raw field, fallback to 1.0
   const confMatch = message.match(/[Cc]onfiança:\s*([\d.]+)/);
   const confidence = confMatch
     ? parseFloat(confMatch[1])
     : Number(raw['confidence'] ?? raw['score'] ?? 1.0);
 
-  const box = (raw['box'] ?? { top: 0, right: 0, bottom: 0, left: 0 }) as VectorAIResult['box'];
-  return { matricula, confidence, box };
+  // Prefer a direct 'documento' field (registration number) when the API provides it.
+  // Fall back to finding the first long digit sequence in the message, which handles
+  // prefixed formats like "DEBUG BIOMETRIA -> 2021102025 (Name) | Tipo: 2 | Confiança: 0.98".
+  const rawDoc = raw['documento'] ?? raw['document'] ?? raw['Document'];
+  const matricula = rawDoc
+    ? String(rawDoc)
+    : (message.match(/\b(\d{6,})\b/)?.[1] ?? null);
+
+  if (!matricula) return null;
+
+  return { matricula, confidence, box: box ?? { top: 0, right: 0, bottom: 0, left: 0 } };
 }

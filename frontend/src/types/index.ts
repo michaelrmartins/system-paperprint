@@ -23,6 +23,7 @@ export interface IdentifyResult {
   daily_consumed: number;
   lyceum_active: boolean;
   confidence?: number;
+  box?: { top: number; right: number; bottom: number; left: number };
 }
 
 export interface StackedDebit {

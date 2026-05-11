@@ -72,12 +72,17 @@ export async function studentRoutes(app: FastifyInstance) {
 
     if (!recognition) return reply.status(422).send({ error: 'FACE_NOT_RECOGNIZED' });
 
+    // Face detected by camera but not matched to any student in the database
+    if (!recognition.matricula) {
+      return reply.status(422).send({ error: 'FACE_NOT_RECOGNIZED', box: recognition.box });
+    }
+
     try {
       const result = await findOrCreateStudent(recognition.matricula, { strict: false, force: force === 'true' });
-      return { ...result, confidence: recognition.confidence };
+      return { ...result, confidence: recognition.confidence, box: recognition.box };
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg === 'STUDENT_NOT_IN_LYCEUM') return reply.status(422).send({ error: 'STUDENT_NOT_IN_LYCEUM', registration_number: recognition.matricula });
+      if (msg === 'STUDENT_NOT_IN_LYCEUM') return reply.status(422).send({ error: 'STUDENT_NOT_IN_LYCEUM', registration_number: recognition.matricula, box: recognition.box });
       if (msg === 'STUDENT_NOT_FOUND') return reply.status(404).send({ error: 'STUDENT_NOT_FOUND' });
       throw err;
     }

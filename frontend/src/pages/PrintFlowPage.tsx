@@ -10,12 +10,25 @@ import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { extractApiError } from '../lib/errors';
 
+// Interval between recognition requests in live mode.
+// Industry standard for server-based face recognition: 250–500 ms.
+// Lower = more responsive but higher server load; raise if the Vector AI service is slow.
+const FACE_LIVE_INTERVAL_MS = 300;
+const CAMERA_PREF_KEY = 'paperprint_preferred_camera';
+
 type Step = 'identify' | 'sheets' | 'stack' | 'confirm' | 'done';
 type IdentifyMethod = 'manual' | 'rfid' | 'facial';
+type FaceBox = { top: number; right: number; bottom: number; left: number };
 
 interface LoanStudent {
   identify_result: IdentifyResult;
   identify_method: IdentifyMethod;
+}
+
+interface FaceErrData {
+  error?: string;
+  box?: FaceBox;
+  registration_number?: string;
 }
 
 function onlyNumbers(value: string): string {
@@ -26,6 +39,54 @@ function getNotInLyceumReg(err: unknown): string | null {
   const data = (err as { response?: { data?: { error?: string; registration_number?: string } } })?.response?.data;
   if (data?.error === 'STUDENT_NOT_IN_LYCEUM') return data.registration_number ?? '';
   return null;
+}
+
+function extractFaceErrData(err: unknown): FaceErrData | null {
+  return (err as { response?: { data?: FaceErrData } })?.response?.data ?? null;
+}
+
+// Defined outside PrintFlowPage so React never unmounts it on re-render
+interface CameraControlsProps {
+  cameras: MediaDeviceInfo[];
+  selectedCameraId: string;
+  onSelect: (id: string) => void;
+  onCycle: () => void;
+  error?: string;
+}
+
+function CameraControls({ cameras, selectedCameraId, onSelect, onCycle, error }: CameraControlsProps) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        {cameras.length > 1 ? (
+          <select
+            value={selectedCameraId}
+            onChange={(e) => onSelect(e.target.value)}
+            className="flex-1 px-3 py-1.5 text-[12px] border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white/70"
+          >
+            {cameras.map((c, i) => (
+              <option key={c.deviceId} value={c.deviceId}>
+                {c.label || `Câmera ${i + 1}`}
+              </option>
+            ))}
+          </select>
+        ) : cameras.length === 1 ? (
+          <span className="flex-1 text-[12px] text-gray-500 truncate px-1">
+            {cameras[0].label || 'Câmera 1'}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          onClick={onCycle}
+          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors flex-shrink-0"
+          title={cameras.length > 1 ? 'Trocar câmera' : 'Reiniciar câmera'}
+        >
+          <RefreshCw size={13} />
+        </button>
+      </div>
+      {error && <p className="text-[12px] text-red-500">{error}</p>}
+    </div>
+  );
 }
 
 export function PrintFlowPage() {
@@ -59,15 +120,31 @@ export function PrintFlowPage() {
 
   // Camera state
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCameraId, setSelectedCameraId] = useState<string>('');
+  const [selectedCameraId, setSelectedCameraId] = useState<string>(
+    () => localStorage.getItem(CAMERA_PREF_KEY) || ''
+  );
   const [cameraActive, setCameraActive] = useState(false);
+  const [faceBox, setFaceBox] = useState<FaceBox | null>(null);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
+  const liveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isRecognizingRef = useRef(false);
+  // Always points to the freshest live handler (updated each render)
+  const liveHandlerRef = useRef<(() => Promise<void>) | null>(null);
+  // Callback ref: re-applies the stream every time a video element mounts (prevents black screen on re-render)
+  const videoCallbackRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el && streamRef.current) el.srcObject = streamRef.current;
+  }, []);
 
   useEffect(() => {
-    return () => { streamRef.current?.getTracks().forEach((t) => t.stop()); };
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (liveTimerRef.current) clearInterval(liveTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -76,47 +153,48 @@ export function PrintFlowPage() {
     }
   }, [step, identifyMethod]);
 
-  const enumerateCameras = useCallback(async () => {
-    try {
-      // Ask for permission once so labels are populated
-      const probe = await navigator.mediaDevices.getUserMedia({ video: true });
-      probe.getTracks().forEach((t) => t.stop());
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoInputs = devices.filter((d) => d.kind === 'videoinput');
-      setCameras(videoInputs);
-      if (videoInputs.length > 0) {
-        setSelectedCameraId((prev) => prev || videoInputs[0].deviceId);
-      }
-    } catch {
-      setIdentifyError('Câmera não disponível. Use outro método de identificação.');
+  // ── Camera utilities ──────────────────────────────────────────────────────
+
+  const stopLiveLoop = useCallback(() => {
+    if (liveTimerRef.current) {
+      clearInterval(liveTimerRef.current);
+      liveTimerRef.current = null;
     }
+    isRecognizingRef.current = false;
   }, []);
-
-  useEffect(() => {
-    if (identifyMethod === 'facial') {
-      enumerateCameras();
-    }
-  }, [identifyMethod, enumerateCameras]);
-
-  useEffect(() => {
-    if (addingLoan && loanIdentifyMethod === 'facial') {
-      enumerateCameras();
-    }
-  }, [addingLoan, loanIdentifyMethod, enumerateCameras]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setCameraActive(false);
+    setFaceBox(null);
+    if (liveTimerRef.current) {
+      clearInterval(liveTimerRef.current);
+      liveTimerRef.current = null;
+    }
+    isRecognizingRef.current = false;
   }, []);
 
-  const startCamera = useCallback(async () => {
+  const enumerateCameras = useCallback(async (): Promise<MediaDeviceInfo[]> => {
     try {
-      stopCamera();
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true });
+      probe.getTracks().forEach((t) => t.stop());
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === 'videoinput');
+      setCameras(inputs);
+      return inputs;
+    } catch {
+      setIdentifyError('Câmera não disponível. Use outro método de identificação.');
+      return [];
+    }
+  }, []);
+
+  const startCamera = useCallback(async (overrideDeviceId?: string) => {
+    const id = overrideDeviceId ?? selectedCameraId;
+    stopCamera();
+    try {
       const constraints: MediaStreamConstraints = {
-        video: selectedCameraId
-          ? { deviceId: { exact: selectedCameraId } }
-          : { facingMode: 'user' },
+        video: id ? { deviceId: { exact: id } } : { facingMode: 'user' },
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
@@ -127,44 +205,245 @@ export function PrintFlowPage() {
     }
   }, [selectedCameraId, stopCamera]);
 
-  // Restart camera when selected device changes
+  const handleCameraChange = useCallback((deviceId: string) => {
+    setSelectedCameraId(deviceId);
+    localStorage.setItem(CAMERA_PREF_KEY, deviceId);
+    if (cameraActive) startCamera(deviceId);
+  }, [cameraActive, startCamera]);
+
+  // Capture a single JPEG frame from the live video element
+  const captureFrame = (): string | null => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0) return null;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = video.videoWidth;
+    offscreen.height = video.videoHeight;
+    offscreen.getContext('2d')!.drawImage(video, 0, 0);
+    return offscreen.toDataURL('image/jpeg', 0.8);
+  };
+
+  // ── Auto-start camera when switching to facial tab ────────────────────────
+
   useEffect(() => {
-    if (cameraActive && selectedCameraId) {
-      startCamera();
+    if (identifyMethod !== 'facial' || step !== 'identify') return;
+    let cancelled = false;
+    (async () => {
+      const inputs = await enumerateCameras();
+      if (cancelled || inputs.length === 0) return;
+      const savedId = localStorage.getItem(CAMERA_PREF_KEY);
+      const deviceId = (savedId && inputs.some((d) => d.deviceId === savedId))
+        ? savedId
+        : inputs[0].deviceId;
+      if (!cancelled) {
+        setSelectedCameraId(deviceId);
+        await startCamera(deviceId);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [identifyMethod]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!addingLoan || loanIdentifyMethod !== 'facial') return;
+    let cancelled = false;
+    (async () => {
+      const inputs = await enumerateCameras();
+      if (cancelled || inputs.length === 0) return;
+      const savedId = localStorage.getItem(CAMERA_PREF_KEY);
+      const deviceId = (savedId && inputs.some((d) => d.deviceId === savedId))
+        ? savedId
+        : inputs[0].deviceId;
+      if (!cancelled) {
+        setSelectedCameraId(deviceId);
+        await startCamera(deviceId);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [addingLoan, loanIdentifyMethod]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Live recognition loop ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!cameraActive) return;
+    if (liveTimerRef.current) clearInterval(liveTimerRef.current);
+    isRecognizingRef.current = false;
+
+    liveTimerRef.current = setInterval(async () => {
+      if (isRecognizingRef.current || !liveHandlerRef.current) return;
+      isRecognizingRef.current = true;
+      try {
+        await liveHandlerRef.current();
+      } finally {
+        isRecognizingRef.current = false;
+      }
+    }, FACE_LIVE_INTERVAL_MS);
+
+    return () => {
+      if (liveTimerRef.current) {
+        clearInterval(liveTimerRef.current);
+        liveTimerRef.current = null;
+      }
+    };
+  }, [cameraActive]);
+
+  // ── Draw face bounding box on overlay canvas ──────────────────────────────
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas) return;
+
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (!w || !h) return;
+
+    canvas.width = w;
+    canvas.height = h;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    if (!faceBox || !video || !video.videoWidth) return;
+
+    const { top, right, bottom, left } = faceBox;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    // Reproduce object-cover crop to align box coords with display
+    const videoAspect = vw / vh;
+    const displayAspect = w / h;
+    let scale: number, ox = 0, oy = 0;
+    if (videoAspect > displayAspect) {
+      scale = h / vh;
+      ox = (w - vw * scale) / 2;
+    } else {
+      scale = w / vw;
+      oy = (h - vh * scale) / 2;
     }
-  }, [selectedCameraId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const captureAndRecognize = useCallback(async (force = false) => {
-    if (!videoRef.current) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
-    const image = canvas.toDataURL('image/jpeg', 0.8);
+    const bx = left * scale + ox;
+    const by = top * scale + oy;
+    const bw = (right - left) * scale;
+    const bh = (bottom - top) * scale;
+    const cs = Math.min(bw, bh) * 0.22;
 
-    setIdentifying(true);
-    setIdentifyError('');
+    // Subtle filled rect
+    ctx.fillStyle = 'rgba(34, 197, 94, 0.08)';
+    ctx.fillRect(bx, by, bw, bh);
+
+    // Border
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    // Corner accent marks
+    const drawCorner = (x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) => {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineTo(x3, y3);
+      ctx.stroke();
+    };
+    ctx.strokeStyle = 'rgba(22, 163, 74, 0.95)';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    drawCorner(bx + cs, by, bx, by, bx, by + cs);
+    drawCorner(bx + bw - cs, by, bx + bw, by, bx + bw, by + cs);
+    drawCorner(bx, by + bh - cs, bx, by + bh, bx + cs, by + bh);
+    drawCorner(bx + bw, by + bh - cs, bx + bw, by + bh, bx + bw - cs, by + bh);
+  }, [faceBox]);
+
+  // ── Live recognition handlers (re-created each render for fresh state) ────
+
+  const mainLiveHandler = async () => {
+    const image = captureFrame();
+    if (!image) return;
     try {
-      const res = await api.post<IdentifyResult>(
-        '/students/identify/facial',
-        { image },
-        force ? { params: { force: 'true' } } : undefined,
-      );
+      const res = await api.post<IdentifyResult>('/students/identify/facial', { image });
+      setFaceBox(res.data.box ?? null);
       stopCamera();
       setIdentifyResult(res.data);
       setIdentifyMethodUsed('facial');
       setStep('sheets');
     } catch (err) {
-      const reg = getNotInLyceumReg(err);
-      if (reg !== null) {
-        setNotInLyceumModal({ registration_number: reg, confirm: () => captureAndRecognize(true) });
-        return;
+      const data = extractFaceErrData(err);
+      setFaceBox(data?.box ?? null);
+      if (data?.error === 'STUDENT_NOT_IN_LYCEUM') {
+        stopLiveLoop();
+        const reg = data.registration_number ?? '';
+        setNotInLyceumModal({
+          registration_number: reg,
+          confirm: async () => {
+            const forceImage = captureFrame();
+            if (!forceImage) return;
+            setIdentifying(true);
+            try {
+              const r = await api.post<IdentifyResult>(
+                '/students/identify/facial',
+                { image: forceImage },
+                { params: { force: 'true' } },
+              );
+              stopCamera();
+              setIdentifyResult(r.data);
+              setIdentifyMethodUsed('facial');
+              setStep('sheets');
+            } catch (e) {
+              setIdentifyError(extractApiError(e));
+            } finally {
+              setIdentifying(false);
+            }
+          },
+        });
       }
-      setIdentifyError(extractApiError(err));
-    } finally {
-      setIdentifying(false);
+      // FACE_NOT_RECOGNIZED: loop continues automatically
     }
-  }, [stopCamera]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+
+  const loanLiveHandler = async () => {
+    const image = captureFrame();
+    if (!image) return;
+    try {
+      const res = await api.post<IdentifyResult>('/students/identify/facial', { image });
+      setFaceBox(res.data.box ?? null);
+      stopLiveLoop();
+      validateAndAddLoanStudent(res.data, 'facial');
+    } catch (err) {
+      const data = extractFaceErrData(err);
+      setFaceBox(data?.box ?? null);
+      if (data?.error === 'STUDENT_NOT_IN_LYCEUM') {
+        stopLiveLoop();
+        const reg = data.registration_number ?? '';
+        setNotInLyceumModal({
+          registration_number: reg,
+          confirm: async () => {
+            const forceImage = captureFrame();
+            if (!forceImage) return;
+            setLoanLoading(true);
+            try {
+              const r = await api.post<IdentifyResult>(
+                '/students/identify/facial',
+                { image: forceImage },
+                { params: { force: 'true' } },
+              );
+              validateAndAddLoanStudent(r.data, 'facial');
+            } catch (e) {
+              setLoanError(extractApiError(e));
+            } finally {
+              setLoanLoading(false);
+            }
+          },
+        });
+      }
+      // FACE_NOT_RECOGNIZED: loop continues automatically
+    }
+  };
+
+  // Always keep the ref pointing to the freshest handler (avoids stale closures in the interval)
+  liveHandlerRef.current = (addingLoan && loanIdentifyMethod === 'facial')
+    ? loanLiveHandler
+    : mainLiveHandler;
+
+  // ── Other identification methods ──────────────────────────────────────────
 
   const identifyByManual = async (force = false) => {
     if (!registration.trim()) return;
@@ -279,7 +558,7 @@ export function PrintFlowPage() {
       setLoanError('');
       stopCamera();
       setLoanAddedMsg(
-        `✓ ${result.student.name} adicionado (+${result.available_balance} folha${result.available_balance !== 1 ? 's' : ''}). Ainda faltam ${remaining} folha${remaining !== 1 ? 's' : ''}.`
+        `${result.student.name} adicionado (+${result.available_balance} folha${result.available_balance !== 1 ? 's' : ''}). Ainda faltam ${remaining} folha${remaining !== 1 ? 's' : ''}.`
       );
       return true;
     }
@@ -333,33 +612,6 @@ export function PrintFlowPage() {
     }
   };
 
-  const addLoanByFacial = async (force = false) => {
-    if (!videoRef.current) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d')!.drawImage(videoRef.current, 0, 0);
-    const image = canvas.toDataURL('image/jpeg', 0.8);
-    setLoanLoading(true);
-    try {
-      const res = await api.post<IdentifyResult>(
-        '/students/identify/facial',
-        { image },
-        force ? { params: { force: 'true' } } : undefined,
-      );
-      validateAndAddLoanStudent(res.data, 'facial');
-    } catch (err) {
-      const reg = getNotInLyceumReg(err);
-      if (reg !== null) {
-        setNotInLyceumModal({ registration_number: reg, confirm: () => addLoanByFacial(true) });
-        return;
-      }
-      setErrorModal(extractApiError(err));
-    } finally {
-      setLoanLoading(false);
-    }
-  };
-
   const confirmPrint = async () => {
     if (!identifyResult) return;
     setConfirmLoading(true);
@@ -404,8 +656,17 @@ export function PrintFlowPage() {
   const switchMethod = (method: IdentifyMethod) => {
     setIdentifyMethod(method);
     setIdentifyError('');
-    stopCamera();
+    if (method !== 'facial') stopCamera();
   };
+
+  const handleCameraCycle = useCallback(() => {
+    if (cameras.length > 1) {
+      const idx = cameras.findIndex((c) => c.deviceId === selectedCameraId);
+      handleCameraChange(cameras[(idx + 1) % cameras.length].deviceId);
+    } else {
+      startCamera();
+    }
+  }, [cameras, selectedCameraId, handleCameraChange, startCamera]);
 
   return (
     <div className="max-w-lg mx-auto space-y-4">
@@ -476,68 +737,53 @@ export function PrintFlowPage() {
             </div>
           )}
 
-          {/* Facial */}
+          {/* Facial — live mode */}
           {identifyMethod === 'facial' && (
             <div className="space-y-3">
-              {/* Camera selector */}
-              {cameras.length > 1 && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[12px] font-medium text-gray-500 uppercase tracking-wide">Câmera</label>
-                  <select
-                    value={selectedCameraId}
-                    onChange={(e) => setSelectedCameraId(e.target.value)}
-                    className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-xl outline-none focus:border-gray-400 bg-white/70"
-                  >
-                    {cameras.map((c, i) => (
-                      <option key={c.deviceId} value={c.deviceId}>
-                        {c.label || `Câmera ${i + 1}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="relative rounded-xl overflow-hidden bg-gray-900 aspect-video">
-                <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              <CameraControls
+                cameras={cameras}
+                selectedCameraId={selectedCameraId}
+                onSelect={handleCameraChange}
+                onCycle={handleCameraCycle}
+                error={identifyError}
+              />
+              <div className="relative rounded-xl overflow-hidden bg-gray-900 aspect-[4/3]">
+                <video ref={videoCallbackRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }} />
                 {!cameraActive && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <Button onClick={startCamera} variant="secondary" size="sm">
-                      <Camera size={14} />
-                      Ativar câmera
-                    </Button>
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+                    <Spinner size="sm" />
+                    <span className="ml-2 text-white/80 text-[12px]">Iniciando câmera...</span>
                   </div>
                 )}
-                {cameraActive && cameras.length === 1 && (
-                  <button
-                    onClick={startCamera}
-                    className="absolute top-2 right-2 p-1.5 bg-black/40 rounded-lg text-white hover:bg-black/60 transition-colors"
-                    title="Reiniciar câmera"
-                  >
-                    <RefreshCw size={13} />
-                  </button>
+                {cameraActive && (
+                  <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/35 backdrop-blur-sm rounded-full">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                      <span className="text-[11px] text-white/80 tracking-wide">
+                        {faceBox ? 'Rosto detectado' : 'Escaneando...'}
+                      </span>
+                    </div>
+                  </div>
                 )}
               </div>
-
-              <Button
-                onClick={() => captureAndRecognize()}
-                loading={identifying}
-                disabled={!cameraActive}
-                className="w-full justify-center"
-              >
-                <Camera size={15} />
-                Capturar e Identificar
-              </Button>
+              {identifying && (
+                <div className="flex items-center justify-center gap-2 text-[13px] text-gray-500">
+                  <Spinner size="sm" />
+                  Verificando...
+                </div>
+              )}
             </div>
           )}
 
-          {identifying && (
+          {identifyMethod !== 'facial' && identifying && (
             <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
               <Spinner size="sm" />
               Identificando...
             </div>
           )}
 
-          {identifyError && (
+          {identifyMethod !== 'facial' && identifyError && (
             <p className="mt-3 text-[13px] text-red-500 animate-fadeIn">{identifyError}</p>
           )}
         </div>
@@ -601,7 +847,7 @@ export function PrintFlowPage() {
               );
               return (
                 <p className="mt-3 text-[13px] text-emerald-600 font-medium">
-                  ✓ Saldo suficiente para esta operação.
+                  Saldo suficiente para esta operação.
                 </p>
               );
             })()}
@@ -792,51 +1038,45 @@ export function PrintFlowPage() {
           </>
         )}
 
-        {/* Facial */}
+        {/* Facial — live mode */}
         {loanIdentifyMethod === 'facial' && (
-          <>
-            {cameras.length > 1 && (
-              <div className="flex flex-col gap-1.5 mb-3">
-                <label className="text-[12px] font-medium text-gray-500 uppercase tracking-wide">Câmera</label>
-                <select
-                  value={selectedCameraId}
-                  onChange={(e) => setSelectedCameraId(e.target.value)}
-                  className="w-full px-3 py-2 text-[13px] border border-gray-200 rounded-xl outline-none focus:border-gray-400 bg-white/70"
-                >
-                  {cameras.map((c, i) => (
-                    <option key={c.deviceId} value={c.deviceId}>
-                      {c.label || `Câmera ${i + 1}`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className="relative rounded-xl overflow-hidden bg-gray-900 aspect-video mb-1">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+          <div className="space-y-3">
+            <CameraControls
+              cameras={cameras}
+              selectedCameraId={selectedCameraId}
+              onSelect={handleCameraChange}
+              onCycle={handleCameraCycle}
+              error={loanError}
+            />
+            <div className="relative rounded-xl overflow-hidden bg-gray-900 aspect-[4/3]">
+              <video ref={videoCallbackRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }} />
               {!cameraActive && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Button onClick={startCamera} variant="secondary" size="sm">
-                    <Camera size={14} />
-                    Ativar câmera
-                  </Button>
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+                  <Spinner size="sm" />
+                  <span className="ml-2 text-white/80 text-[12px]">Iniciando câmera...</span>
+                </div>
+              )}
+              {cameraActive && (
+                <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/35 backdrop-blur-sm rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-[11px] text-white/80 tracking-wide">
+                      {faceBox ? 'Rosto detectado' : 'Escaneando...'}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
-            {loanError && <p className="text-[12px] text-red-500 mb-2">{loanError}</p>}
-            <div className="flex gap-2 mt-3">
+            {loanLoading && (
+              <div className="flex items-center justify-center gap-2 text-[13px] text-gray-500">
+                <Spinner size="sm" />
+                Verificando...
+              </div>
+            )}
+            <div className="flex gap-2 mt-1">
               <Button variant="secondary" onClick={closeLoanModal} size="sm">Cancelar</Button>
-              <Button onClick={() => addLoanByFacial()} loading={loanLoading} disabled={!cameraActive} className="flex-1 justify-center" size="sm">
-                <Camera size={14} />
-                Capturar e Adicionar
-              </Button>
             </div>
-          </>
-        )}
-
-        {loanLoading && loanIdentifyMethod !== 'manual' && loanIdentifyMethod !== 'rfid' && (
-          <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
-            <Spinner size="sm" />
-            Identificando...
           </div>
         )}
       </Modal>

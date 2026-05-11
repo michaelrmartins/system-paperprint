@@ -85,7 +85,7 @@ export interface SituatorPerson {
 }
 
 export interface VectorAIResult {
-  matricula: string;
+  matricula: string | null; // null = face detected but not in database
   confidence: number;
   box: { top: number; right: number; bottom: number; left: number };
 }
