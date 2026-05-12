@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: paperprint-prod-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    ports:
+      - "5437:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - paperprint-prod-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: michaelrmartins/system-paperprint-backend:latest
+    container_name: paperprint-prod-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      BACKEND_PORT: ${BACKEND_PORT:-3001}
+      LYCEUM_API_URL: ${LYCEUM_API_URL}
+      LYCEUM_API_KEY: ${LYCEUM_API_KEY}
+      SITUATOR_URL: ${SITUATOR_URL}
+      SITUATOR_API_KEY: ${SITUATOR_API_KEY}
+      VECTOR_AI_URL: ${VECTOR_AI_URL}
+      VECTOR_AI_API_KEY: ${VECTOR_AI_API_KEY}
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    ports:
+      - "${BACKEND_PORT:-3006}:3001"
+    networks:
+      - paperprint-prod-net
+    extra_hosts:
+      - "${SITUATOR_HOSTNAME:-network-services-middleware-situator.intranet.local}:${SITUATOR_IP:-0.0.0.0}"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    image: michaelrmartins/system-paperprint-frontend:latest
+    container_name: paperprint-prod-frontend
+    restart: always
+    ports:
+      - "3005:80"
+    networks:
+      - paperprint-prod-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 32M
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+networks:
+  paperprint-prod-net:
+    driver: bridge
+    name: paperprint-prod-net
+
+volumes:
+  postgres_prod_data:
+    name: paperprint-prod-postgres-data
