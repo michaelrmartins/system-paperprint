@@ -4,7 +4,7 @@ import { db } from '../db/knex.js';
 
 export async function reportRoutes(app: FastifyInstance) {
   // Consumption by course
-  app.get('/reports/by-course', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/by-course', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('entries')
       .join('students', 'entries.student_id', 'students.id')
@@ -19,7 +19,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Consumption by period
-  app.get('/reports/by-period', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/by-period', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('entries')
       .join('students', 'entries.student_id', 'students.id')
@@ -34,7 +34,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Top N students by consumption
-  app.get('/reports/top-students', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/top-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end, limit = '20' } = req.query as { start?: string; end?: string; limit?: string };
     return db('entries')
       .join('students', 'entries.student_id', 'students.id')
@@ -57,7 +57,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Monthly evolution
-  app.get('/reports/monthly', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/monthly', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { year = String(new Date().getFullYear()) } = req.query as { year?: string };
     return db('entries')
       .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
@@ -72,7 +72,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Audit log
-  app.get('/reports/audit', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/audit', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('audit_log')
       .join('system_users', 'audit_log.operator_id', 'system_users.id')
@@ -98,7 +98,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Peak hours — operations and sheets by hour of day
-  app.get('/reports/by-hour', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/by-hour', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     const rows = await db('print_operations')
       .modify((q) => {
@@ -121,7 +121,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Operations per operator
-  app.get('/reports/by-operator', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/by-operator', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('print_operations')
       .join('system_users', 'print_operations.operator_id', 'system_users.id')
@@ -139,7 +139,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Own prints vs borrowed quota
-  app.get('/reports/own-vs-borrowed', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/own-vs-borrowed', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('entries')
       .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
@@ -156,7 +156,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Identification method breakdown
-  app.get('/reports/by-identify-method', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/by-identify-method', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('print_operations')
       .modify((q) => {
@@ -173,7 +173,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Daily evolution
-  app.get('/reports/daily', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/daily', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('entries')
       .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
@@ -191,7 +191,7 @@ export async function reportRoutes(app: FastifyInstance) {
   });
 
   // Students within a period (for expandable rows)
-  app.get('/reports/period-students', { preHandler: requireAuth(['auditor', 'admin']) }, async (req) => {
+  app.get('/reports/period-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { period, start, end } = req.query as { period?: string; start?: string; end?: string };
     if (!period) return [];
     return db('entries')

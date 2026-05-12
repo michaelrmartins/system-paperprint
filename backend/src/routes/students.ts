@@ -184,7 +184,7 @@ export async function studentRoutes(app: FastifyInstance) {
       ? await db('entries')
           .join('students', 'entries.student_id', 'students.id')
           .whereIn('entries.print_operation_id', opIds)
-          .select('entries.*', 'students.name as student_name', 'students.registration_number')
+          .select('entries.*', 'students.name as student_name', 'students.registration_number', 'students.course', 'students.period')
       : [];
 
     const entriesByOp = new Map<number, typeof allEntries>();
@@ -215,6 +215,7 @@ export async function studentRoutes(app: FastifyInstance) {
         'entries.created_at',
         'print_operations.id as operation_id',
         'print_operations.total_sheets as operation_total',
+        'primary_s.id as primary_student_id',
         'primary_s.name as primary_student_name',
         'primary_s.registration_number as primary_registration',
         'system_users.login as operator_login'

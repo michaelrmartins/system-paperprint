@@ -50,7 +50,7 @@ const navItems: NavItem[] = [
   { to: '/', icon: <Printer size={17} />, label: 'Impressão', roles: ['operator', 'admin'] },
   { to: '/today', icon: <List size={17} />, label: 'Hoje', roles: ['operator', 'auditor', 'admin'] },
   { to: '/adjust', icon: <FileEdit size={17} />, label: 'Ajuste', roles: ['operator', 'admin'] },
-  { to: '/reports', icon: <BarChart2 size={17} />, label: 'Relatórios', roles: ['auditor', 'admin'] },
+  { to: '/reports', icon: <BarChart2 size={17} />, label: 'Relatórios', roles: ['operator', 'auditor', 'admin'] },
   { to: '/settings', icon: <Settings size={17} />, label: 'Config.', roles: ['admin'] },
 ];
 

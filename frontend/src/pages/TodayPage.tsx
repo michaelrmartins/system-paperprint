@@ -49,6 +49,8 @@ interface PrimaryEntry {
   type: 'own' | 'borrowed';
   student_name: string;
   registration_number: string;
+  course?: string;
+  period?: string;
 }
 
 interface PrimaryOperation {
@@ -68,6 +70,7 @@ interface LoanEntry {
   created_at: string;
   operation_id: number;
   operation_total: number;
+  primary_student_id: number;
   primary_student_name: string;
   primary_registration: string;
   operator_login: string;
@@ -130,12 +133,29 @@ export function TodayPage() {
     }
   };
 
+  const openDetailByEntry = (studentId: number, registrationNumber: string, name: string) => {
+    openDetail({
+      id: studentId,
+      registration_number: registrationNumber,
+      name,
+      course: '',
+      period: '',
+      quota_used: 0,
+      sheets_lent: 0,
+      total_printed: 0,
+      gave_loans: false,
+      received_loans: false,
+      last_operation_at: new Date().toISOString(),
+      identify_method: null,
+    });
+  };
+
   const filtered = students.filter((s) => {
     const matchSearch =
       s.name.toLowerCase().includes(search.toLowerCase()) ||
       s.registration_number.includes(search);
     if (!matchSearch) return false;
-    if (filter === 'own') return !s.received_loans;
+    if (filter === 'own') return (s.quota_used - s.sheets_lent) > 0;
     if (filter === 'borrowed') return s.received_loans;
     return true;
   });
@@ -208,15 +228,21 @@ export function TodayPage() {
                   <button
                     key={s.id}
                     onClick={() => openDetail(s)}
-                    className="w-full flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50/60 active:bg-gray-100/60 transition-colors text-left animate-fadeIn"
+                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-50/60 active:bg-gray-100/60 transition-colors text-left animate-fadeIn"
                     style={{ animationDelay: `${i * 20}ms` }}
                   >
                     {/* Student info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <p className="text-[14px] font-medium text-gray-900 truncate">{s.name}</p>
+                        <p className="text-[13px] font-medium text-gray-900 truncate">{s.name}</p>
+                        {s.identify_method && (
+                          <span className={`flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${METHOD_CLASS[s.identify_method] ?? 'bg-gray-100 text-gray-500'}`}>
+                            {METHOD_ICON[s.identify_method]}
+                            {METHOD_LABEL[s.identify_method]}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-[12px] text-gray-500 mt-0.5 truncate">
+                      <p className="text-[11px] text-gray-400 truncate">
                         {s.registration_number}
                         {s.course && ` · ${s.course}`}
                         {s.period && ` · ${s.period}`}
@@ -224,35 +250,25 @@ export function TodayPage() {
                     </div>
 
                     {/* Time + Stats */}
-                    <div className="shrink-0 flex items-center gap-3 text-right">
-                      <div className="flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-1 text-[12px] text-gray-400">
-                          <Clock size={11} />
-                          {formatTime(s.last_operation_at)}
-                        </div>
-                        {s.identify_method && (
-                          <span className={`flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${METHOD_CLASS[s.identify_method] ?? 'bg-gray-100 text-gray-500'}`}>
-                            {METHOD_ICON[s.identify_method]}
-                            {METHOD_LABEL[s.identify_method]}
-                          </span>
-                        )}
+                    <div className="shrink-0 flex items-center gap-3">
+                      <div className="flex items-center gap-1 text-[11px] text-gray-400">
+                        <Clock size={10} />
+                        {formatTime(s.last_operation_at)}
                       </div>
                       {(() => {
                         const received = s.total_printed - (s.quota_used - s.sheets_lent);
                         return (
-                          <div className="text-right">
-                            <p className="text-[16px] font-bold text-gray-900">{s.quota_used}</p>
-                            <p className="text-[11px] text-gray-400">folhas</p>
-                            {(s.received_loans || s.gave_loans) && (
-                              <div className="flex items-center justify-end gap-2 mt-0.5">
-                                {s.received_loans && received > 0 && (
-                                  <span className="text-[11px] font-medium text-amber-500">↓ {received}</span>
-                                )}
-                                {s.gave_loans && (
-                                  <span className="text-[11px] font-medium text-emerald-600">↑ {s.sheets_lent}</span>
-                                )}
-                              </div>
-                            )}
+                          <div className="text-right min-w-[44px]">
+                            <p className="text-[14px] font-bold text-gray-900 leading-tight">{s.quota_used}</p>
+                            <div className="flex items-center justify-end gap-1">
+                              <p className="text-[10px] text-gray-400 leading-none">folhas</p>
+                              {s.received_loans && received > 0 && (
+                                <span className="text-[10px] font-medium text-amber-500">↓{received}</span>
+                              )}
+                              {s.gave_loans && (
+                                <span className="text-[10px] font-medium text-emerald-600">↑{s.sheets_lent}</span>
+                              )}
+                            </div>
                           </div>
                         );
                       })()}
@@ -262,7 +278,7 @@ export function TodayPage() {
               </div>
 
               {/* Pagination */}
-              {totalPages > 1 && (
+              {filtered.length > 0 && (
                 <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100/80 bg-gray-50/40">
                   <p className="text-[12px] text-gray-400">
                     {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
@@ -393,29 +409,43 @@ export function TodayPage() {
                     <div key={op.id} className="rounded-xl border border-gray-100 overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-2 bg-gray-50/70 border-b border-gray-100">
                         <span className="text-[12px] text-gray-500">
-                          Op. #{op.id} · {op.operator_login}
+                          Op. #{op.id} · {formatTime(op.created_at)} · {op.operator_login}
                         </span>
                         <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
                       </div>
-                      {op.entries.map((e) => (
-                        <div key={e.id} className="flex items-center justify-between px-4 py-2 bg-white/60">
-                          <div className="flex items-center gap-2">
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                              e.student_id === selectedStudent?.id
-                                ? 'bg-blue-50 text-blue-700'
-                                : 'bg-amber-50 text-amber-700'
-                            }`}>
-                              {e.student_id === selectedStudent?.id ? 'Própria' : 'Empréstimo'}
-                            </span>
-                            {e.student_id !== selectedStudent?.id && (
-                              <span className="text-[12px] text-gray-600 truncate max-w-[140px]">
-                                de {e.student_name}
+                      {op.entries.map((e) => {
+                        const parts = e.student_name.trim().split(/\s+/);
+                        const displayName = parts.length > 1
+                          ? `${parts[0]} ${parts[parts.length - 1]}`
+                          : parts[0];
+                        return (
+                          <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+                                e.student_id === selectedStudent?.id
+                                  ? 'bg-blue-50 text-blue-700'
+                                  : 'bg-amber-50 text-amber-700'
+                              }`}>
+                                {e.student_id === selectedStudent?.id ? 'Própria' : 'Empréstimo'}
                               </span>
-                            )}
+                              {e.student_id !== selectedStudent?.id && (
+                                <button
+                                  onClick={(ev) => { ev.stopPropagation(); openDetailByEntry(e.student_id, e.registration_number, e.student_name); }}
+                                  className="min-w-0 text-left group"
+                                >
+                                  <p className="text-[12px] font-medium text-gray-800 leading-tight group-hover:text-blue-600 transition-colors">{displayName}</p>
+                                  <p className="text-[10px] text-gray-400 leading-tight truncate">
+                                    {e.registration_number}
+                                    {e.course ? ` · ${e.course}` : ''}
+                                    {e.period ? ` · ${e.period}` : ''}
+                                  </p>
+                                </button>
+                              )}
+                            </div>
+                            <span className="text-[13px] font-semibold text-gray-900 shrink-0">{e.sheets} folhas</span>
                           </div>
-                          <span className="text-[13px] font-semibold text-gray-900 shrink-0">{e.sheets} folhas</span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
@@ -431,10 +461,13 @@ export function TodayPage() {
                 <div className="rounded-xl border border-gray-100 overflow-hidden divide-y divide-gray-100">
                   {fullHistory.as_lender.map((e) => (
                     <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
-                      <div>
-                        <p className="text-[13px] font-medium text-gray-900">{e.primary_student_name}</p>
+                      <button
+                        onClick={() => openDetailByEntry(e.primary_student_id, e.primary_registration, e.primary_student_name)}
+                        className="text-left group"
+                      >
+                        <p className="text-[13px] font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{e.primary_student_name}</p>
                         <p className="text-[11px] text-gray-400">{e.primary_registration} · op. #{e.operation_id}</p>
-                      </div>
+                      </button>
                       <span className="text-[13px] font-bold text-emerald-700">{e.sheets} folhas</span>
                     </div>
                   ))}
