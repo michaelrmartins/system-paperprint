@@ -21,9 +21,9 @@ export async function reportRoutes(app: FastifyInstance) {
   // Consumption by period
   app.get('/reports/by-period', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
-    return db('entries')
-      .join('students', 'entries.student_id', 'students.id')
-      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+    return db('print_operations')
+      .join('students', 'print_operations.student_id', 'students.id')
+      .join('entries', 'entries.print_operation_id', 'print_operations.id')
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', end);
@@ -36,9 +36,9 @@ export async function reportRoutes(app: FastifyInstance) {
   // Top N students by consumption
   app.get('/reports/top-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end, limit = '20' } = req.query as { start?: string; end?: string; limit?: string };
-    return db('entries')
-      .join('students', 'entries.student_id', 'students.id')
-      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+    return db('print_operations')
+      .join('students', 'print_operations.student_id', 'students.id')
+      .join('entries', 'entries.print_operation_id', 'print_operations.id')
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', end);
@@ -194,9 +194,9 @@ export async function reportRoutes(app: FastifyInstance) {
   app.get('/reports/period-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { period, start, end } = req.query as { period?: string; start?: string; end?: string };
     if (!period) return [];
-    return db('entries')
-      .join('students', 'entries.student_id', 'students.id')
-      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+    return db('print_operations')
+      .join('students', 'print_operations.student_id', 'students.id')
+      .join('entries', 'entries.print_operation_id', 'print_operations.id')
       .where('students.period', period)
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);

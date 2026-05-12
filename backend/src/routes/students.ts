@@ -247,7 +247,7 @@ export async function studentRoutes(app: FastifyInstance) {
     const query = db('entries')
       .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
       .join('system_users', 'print_operations.operator_id', 'system_users.id')
-      .where('entries.student_id', parseInt(id))
+      .where('print_operations.student_id', parseInt(id))
       .select(
         'entries.id',
         'entries.sheets',
