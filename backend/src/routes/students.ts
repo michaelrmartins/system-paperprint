@@ -5,18 +5,46 @@ import * as situatorClient from '../clients/situatorClient.js';
 import * as vectorAIClient from '../clients/vectorAIClient.js';
 import * as lyceumClient from '../clients/lyceumClient.js';
 import { db } from '../db/knex.js';
+import { JwtPayload } from '../types/index.js';
 
 const TODAY_EXPR = `DATE(print_operations.created_at AT TIME ZONE 'America/Sao_Paulo') = (CURRENT_TIMESTAMP AT TIME ZONE 'America/Sao_Paulo')::date`;
+
+async function logInvalidDocument(
+  document: string,
+  situationDetail: string,
+  context: 'primary' | 'loan',
+  identifyMethod: 'manual' | 'rfid' | 'facial',
+  operatorId: number,
+  primaryStudentId?: number | null,
+) {
+  await db('invalid_document_attempts').insert({
+    document,
+    situation_detail: situationDetail,
+    context,
+    identify_method: identifyMethod,
+    operator_id: operatorId,
+    primary_student_id: primaryStudentId ?? null,
+  });
+}
 
 export async function studentRoutes(app: FastifyInstance) {
   // Identify by manual registration number — contingency allowed when Lyceum is down
   app.post('/students/identify/manual', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const { registration_number } = req.body as { registration_number: string };
-    const { force } = req.query as { force?: string };
+    const { force, context = 'primary', primary_student_id } = req.query as { force?: string; context?: string; primary_student_id?: string };
     if (!registration_number?.trim()) {
       return reply.status(400).send({ error: 'MISSING_REGISTRATION_NUMBER' });
     }
     const reg = registration_number.trim();
+    const operator = req.user as JwtPayload;
+
+    const enrollmentStatus = await lyceumClient.getStudentEnrollmentStatus(reg);
+    if (enrollmentStatus !== null && enrollmentStatus !== 'Matriculado') {
+      const primaryId = primary_student_id ? parseInt(primary_student_id) : null;
+      await logInvalidDocument(reg, enrollmentStatus, context === 'loan' ? 'loan' : 'primary', 'manual', operator.sub, primaryId);
+      return reply.status(403).send({ error: 'STUDENT_NOT_ENROLLED', situation_detail: enrollmentStatus });
+    }
+
     try {
       return await findOrCreateStudent(reg, { strict: false, force: force === 'true' });
     } catch (err) {
@@ -30,8 +58,9 @@ export async function studentRoutes(app: FastifyInstance) {
   // Identify by RFID card hex — contingency allowed
   app.post('/students/identify/rfid', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const { card_hex } = req.body as { card_hex: string };
-    const { force } = req.query as { force?: string };
+    const { force, context = 'primary', primary_student_id } = req.query as { force?: string; context?: string; primary_student_id?: string };
     if (!card_hex?.trim()) return reply.status(400).send({ error: 'MISSING_CARD_HEX' });
+    const operator = req.user as JwtPayload;
 
     let person;
     try {
@@ -47,6 +76,13 @@ export async function studentRoutes(app: FastifyInstance) {
     if (!person.Active) return reply.status(403).send({ error: 'STUDENT_INACTIVE' });
     if (!person.Document) return reply.status(422).send({ error: 'DOCUMENT_NOT_FOUND' });
 
+    const enrollmentStatus = await lyceumClient.getStudentEnrollmentStatus(person.Document);
+    if (enrollmentStatus !== null && enrollmentStatus !== 'Matriculado') {
+      const primaryId = primary_student_id ? parseInt(primary_student_id) : null;
+      await logInvalidDocument(person.Document, enrollmentStatus, context === 'loan' ? 'loan' : 'primary', 'rfid', operator.sub, primaryId);
+      return reply.status(403).send({ error: 'STUDENT_NOT_ENROLLED', situation_detail: enrollmentStatus });
+    }
+
     try {
       return await findOrCreateStudent(person.Document, { strict: false, force: force === 'true' });
     } catch (err) {
@@ -60,8 +96,9 @@ export async function studentRoutes(app: FastifyInstance) {
   // Identify by facial recognition — contingency allowed
   app.post('/students/identify/facial', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const { image } = req.body as { image: string };
-    const { force } = req.query as { force?: string };
+    const { force, context = 'primary', primary_student_id } = req.query as { force?: string; context?: string; primary_student_id?: string };
     if (!image) return reply.status(400).send({ error: 'MISSING_IMAGE' });
+    const operator = req.user as JwtPayload;
 
     let recognition;
     try {
@@ -72,9 +109,15 @@ export async function studentRoutes(app: FastifyInstance) {
 
     if (!recognition) return reply.status(422).send({ error: 'FACE_NOT_RECOGNIZED' });
 
-    // Face detected by camera but not matched to any student in the database
     if (!recognition.matricula) {
       return reply.status(422).send({ error: 'FACE_NOT_RECOGNIZED', box: recognition.box });
+    }
+
+    const enrollmentStatus = await lyceumClient.getStudentEnrollmentStatus(recognition.matricula);
+    if (enrollmentStatus !== null && enrollmentStatus !== 'Matriculado') {
+      const primaryId = primary_student_id ? parseInt(primary_student_id) : null;
+      await logInvalidDocument(recognition.matricula, enrollmentStatus, context === 'loan' ? 'loan' : 'primary', 'facial', operator.sub, primaryId);
+      return reply.status(403).send({ error: 'STUDENT_NOT_ENROLLED', situation_detail: enrollmentStatus, box: recognition.box });
     }
 
     try {

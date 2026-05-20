@@ -51,8 +51,9 @@ services:
       BACKEND_PORT: ${BACKEND_PORT:-3001}
       LYCEUM_API_URL: ${LYCEUM_API_URL}
       LYCEUM_API_KEY: ${LYCEUM_API_KEY}
-      SITUATOR_URL: ${SITUATOR_URL}
-      SITUATOR_API_KEY: ${SITUATOR_API_KEY}
+      SITUATOR_BASE_URL: ${SITUATOR_BASE_URL}
+      SITUATOR_USER: ${SITUATOR_USER}
+      SITUATOR_PASSWORD: ${SITUATOR_PASSWORD}
       VECTOR_AI_URL: ${VECTOR_AI_URL}
       VECTOR_AI_API_KEY: ${VECTOR_AI_API_KEY}
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
@@ -60,8 +61,6 @@ services:
       - "${BACKEND_PORT:-3006}:3001"
     networks:
       - paperprint-prod-net
-    extra_hosts:
-      - "${SITUATOR_HOSTNAME:-network-services-middleware-situator.intranet.local}:${SITUATOR_IP:-0.0.0.0}"
     deploy:
       resources:
         limits:

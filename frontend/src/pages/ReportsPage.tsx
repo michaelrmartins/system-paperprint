@@ -10,7 +10,7 @@ import { AuditEntry } from '../types';
 import { Search, ChevronRight, ChevronDown } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'daily' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit';
+type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'daily' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit' | 'invalid-docs';
 
 interface CourseRow    { course: string; total_sheets: string }
 interface PeriodRow    { period: string; total_sheets: string }
@@ -21,6 +21,7 @@ interface HourRow      { hour: number; total_operations: number; total_sheets: n
 interface OperatorRow  { operator: string; total_operations: string; total_sheets: string }
 interface LoanTypeRow        { type: 'own' | 'borrowed'; total_sheets: string; total_operations: string }
 interface IdentifyMethodRow  { identify_method: 'manual' | 'rfid' | 'facial'; total_operations: string; total_sheets: string }
+interface InvalidDocRow      { id: number; document: string; situation_detail: string; context: 'primary' | 'loan'; identify_method: 'manual' | 'rfid' | 'facial'; created_at: string; operator_login: string; primary_student_name: string | null; primary_student_registration: string | null }
 
 const METHOD_LABEL: Record<string, string> = {
   manual: 'Manual (Matrícula)',
@@ -117,6 +118,8 @@ export function ReportsPage() {
   const [topPhoto, setTopPhoto]         = useState<string | null>(null);
   const [topHistory, setTopHistory]     = useState<HistoryEntry[]>([]);
   const [topModalLoading, setTopModalLoading] = useState(false);
+  const [topHistoryPage, setTopHistoryPage] = useState(1);
+  const TOP_HISTORY_PAGE_SIZE = 10;
 
   // History tab
   const [histReg, setHistReg]           = useState('');
@@ -141,7 +144,7 @@ export function ReportsPage() {
         daily: '/reports/daily',
         hours: '/reports/by-hour', operator: '/reports/by-operator',
         'loan-type': '/reports/own-vs-borrowed', 'identify-method': '/reports/by-identify-method',
-        audit: '/reports/audit',
+        audit: '/reports/audit', 'invalid-docs': '/reports/invalid-documents',
       };
       const res = await api.get<unknown[]>(`${ep[tab]}?${params}`);
       setData(res.data);
@@ -188,6 +191,7 @@ export function ReportsPage() {
     setTopModalLoading(true);
     setTopHistory([]);
     setTopPhoto(null);
+    setTopHistoryPage(1);
     try {
       const [histRes, photoRes] = await Promise.all([
         api.get<HistoryEntry[]>(`/students/${student.id}/history`),
@@ -227,6 +231,7 @@ export function ReportsPage() {
     { key: 'identify-method', label: 'Identificação' },
     { key: 'history',         label: 'Histórico' },
     { key: 'audit',           label: 'Auditoria' },
+    { key: 'invalid-docs',    label: 'Docs. Inválidos' },
   ];
 
   const noData = !loading && data.length === 0 && tab !== 'history' && tab !== 'hours';
@@ -665,6 +670,58 @@ export function ReportsPage() {
         </TableWrap>
       )}
 
+      {/* ── Invalid Documents ── */}
+      {!loading && tab === 'invalid-docs' && data.length > 0 && (() => {
+        const rows = data as InvalidDocRow[];
+        const CONTEXT_LABEL: Record<string, string> = { primary: 'Solicitante', loan: 'Emprestador' };
+        const METHOD_LBL: Record<string, string> = { manual: 'Manual', rfid: 'Cartão', facial: 'Facial' };
+        const fmt = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+        return (
+          <TableWrap>
+            <table className="w-full text-[13px]">
+              <thead className="bg-gray-50/80 border-b border-gray-100">
+                <tr><Th>Doc. inválido</Th><Th>Situação</Th><Th>Papel</Th><Th>Solicitante</Th><Th>Método</Th><Th>Operador</Th><Th right>Data/Hora</Th></tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100/80">
+                {rows.map(r => (
+                  <tr key={r.id} className="hover:bg-gray-50/40">
+                    <td className="px-5 py-3 font-mono font-medium text-gray-900">{r.document}</td>
+                    <td className="px-5 py-3">
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-700">{r.situation_detail}</span>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${r.context === 'loan' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                        {CONTEXT_LABEL[r.context] ?? r.context}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">
+                      {r.context === 'loan' && r.primary_student_name ? (
+                        <div>
+                          <p className="font-medium text-gray-800 leading-tight">{r.primary_student_name}</p>
+                          <p className="text-[11px] text-gray-400 font-mono leading-tight">{r.primary_student_registration}</p>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-gray-500">{METHOD_LBL[r.identify_method] ?? r.identify_method}</td>
+                    <td className="px-5 py-3 text-gray-500">{r.operator_login}</td>
+                    <td className="px-5 py-3 text-right text-gray-500 whitespace-nowrap">{fmt(r.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="border-t border-gray-200 bg-gray-50/60">
+                <tr>
+                  <td colSpan={7} className="px-5 py-3 text-[12px] text-gray-500">
+                    {rows.length} tentativa{rows.length !== 1 ? 's' : ''} bloqueada{rows.length !== 1 ? 's' : ''}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </TableWrap>
+        );
+      })()}
+
       {/* ── Top Student Modal ── */}
       <Modal open={!!selectedTop} onClose={() => setSelectedTop(null)} title="Histórico do Aluno" size="xl">
         {selectedTop && (
@@ -682,29 +739,73 @@ export function ReportsPage() {
               <div className="flex justify-center py-8"><Spinner /></div>
             ) : topHistory.length === 0 ? (
               <p className="text-center text-[13px] text-gray-400 py-4">Nenhum registro encontrado.</p>
-            ) : (
-              <div className="rounded-xl border border-gray-100 overflow-hidden">
-                <table className="w-full text-[13px]">
-                  <thead className="bg-gray-50/80 border-b border-gray-100">
-                    <tr><Th>Data</Th><Th>Tipo</Th><Th>Operador</Th><Th right>Folhas</Th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {topHistory.map(e => (
-                      <tr key={e.id} className="hover:bg-gray-50/40">
-                        <td className="px-4 py-2.5 text-gray-600">{formatDate(e.created_at)}</td>
-                        <td className="px-4 py-2.5">
-                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${e.type === 'own' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
-                            {ENTRY_TYPE_LABELS[e.type]}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-500">{e.operator_login}</td>
-                        <td className="px-4 py-2.5 text-right font-bold text-gray-900">{e.sheets}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            ) : (() => {
+              const totalPages = Math.max(1, Math.ceil(topHistory.length / TOP_HISTORY_PAGE_SIZE));
+              const safePage = Math.min(topHistoryPage, totalPages);
+              const paged = topHistory.slice((safePage - 1) * TOP_HISTORY_PAGE_SIZE, safePage * TOP_HISTORY_PAGE_SIZE);
+              return (
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-gray-100 overflow-hidden">
+                    <table className="w-full text-[13px]">
+                      <thead className="bg-gray-50/80 border-b border-gray-100">
+                        <tr><Th>Data</Th><Th>Tipo</Th><Th>Operador</Th><Th right>Folhas</Th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {paged.map(e => (
+                          <tr key={e.id} className="hover:bg-gray-50/40">
+                            <td className="px-4 py-2.5 text-gray-600">{formatDate(e.created_at)}</td>
+                            <td className="px-4 py-2.5">
+                              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${e.type === 'own' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                {ENTRY_TYPE_LABELS[e.type]}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-gray-500">{e.operator_login}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-gray-900">{e.sheets}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between pt-1">
+                      <p className="text-[11px] text-gray-400">
+                        {(safePage - 1) * TOP_HISTORY_PAGE_SIZE + 1}–{Math.min(safePage * TOP_HISTORY_PAGE_SIZE, topHistory.length)} de {topHistory.length}
+                      </p>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setTopHistoryPage(Math.max(1, safePage - 1))}
+                          disabled={safePage === 1}
+                          className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Anterior
+                        </button>
+                        {Array.from({ length: totalPages }, (_, i) => i + 1)
+                          .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                          .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                            if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                            acc.push(p);
+                            return acc;
+                          }, [])
+                          .map((p, idx) => p === '...'
+                            ? <span key={`e${idx}`} className="px-1 text-[11px] text-gray-400">…</span>
+                            : <button key={p} onClick={() => setTopHistoryPage(p as number)}
+                                className={`w-7 h-7 text-[11px] font-medium rounded-lg transition-colors ${p === safePage ? 'bg-gray-900 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                                {p}
+                              </button>
+                          )}
+                        <button
+                          onClick={() => setTopHistoryPage(Math.min(totalPages, safePage + 1))}
+                          disabled={safePage === totalPages}
+                          className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Próxima
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </Modal>

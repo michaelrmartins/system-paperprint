@@ -35,10 +35,11 @@ services:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
       - ./backend/src:/app/src
-    # Permite que o container resolva hostnames da rede interna (ex.: Situator).
-    # Se o hostname não resolver automaticamente, defina SITUATOR_IP no .env.
-    extra_hosts:
-      - "${SITUATOR_HOSTNAME:-network-services-middleware-situator.intranet.local}:${SITUATOR_IP:-0.0.0.0}"
+    # Para resolver hostnames internos da rede (ex.: Situator), defina SITUATOR_BASE_URL
+    # com o IP direto no .env (ex.: SITUATOR_BASE_URL=http://192.168.X.X/api/v1).
+    # Se preferir resolver pelo hostname, configure SITUATOR_IP e descomente as linhas abaixo:
+    # extra_hosts:
+    #   - "${SITUATOR_HOSTNAME:-network-services-middleware-situator.intranet.local}:${SITUATOR_IP}"
 
   frontend:
     build:

@@ -53,6 +53,17 @@ function maybeHexToBase64(value: string): string {
   return value; // already base64
 }
 
+export async function getStudentEnrollmentStatus(registrationNumber: string): Promise<string | null> {
+  try {
+    const result = await fetchJson<{ situacaoDetalhe?: string }>(
+      `${BASE_URL}/alunos/${encodeURIComponent(registrationNumber)}/status`
+    );
+    return result?.situacaoDetalhe ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function isAvailable(): Promise<boolean> {
   try {
     await fetchJson(`${BASE_URL}/alunos/2020202020`);

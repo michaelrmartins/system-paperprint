@@ -3,7 +3,6 @@ import { CreditCard, Keyboard, Camera, ChevronRight, Plus, Trash2, RefreshCw } f
 import api from '../lib/api';
 import { IdentifyResult, StackedDebit } from '../types';
 import { StudentCard } from '../components/StudentCard';
-import { StackPreview } from '../components/StackPreview';
 import { Modal } from '../components/Modal';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -16,7 +15,7 @@ import { extractApiError } from '../lib/errors';
 const FACE_LIVE_INTERVAL_MS = 300;
 const CAMERA_PREF_KEY = 'paperprint_preferred_camera';
 
-type Step = 'identify' | 'sheets' | 'stack' | 'confirm' | 'done';
+type Step = 'identify' | 'sheets' | 'confirm' | 'done';
 type IdentifyMethod = 'manual' | 'rfid' | 'facial';
 type FaceBox = { top: number; right: number; bottom: number; left: number };
 
@@ -403,7 +402,7 @@ export function PrintFlowPage() {
     const image = captureFrame();
     if (!image) return;
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/facial', { image });
+      const res = await api.post<IdentifyResult>('/students/identify/facial', { image }, { params: { context: 'loan', primary_student_id: identifyResult?.student.id } });
       setFaceBox(res.data.box ?? null);
       stopLiveLoop();
       validateAndAddLoanStudent(res.data, 'facial');
@@ -423,7 +422,7 @@ export function PrintFlowPage() {
               const r = await api.post<IdentifyResult>(
                 '/students/identify/facial',
                 { image: forceImage },
-                { params: { force: 'true' } },
+                { params: { force: 'true', context: 'loan', primary_student_id: identifyResult?.student.id } },
               );
               validateAndAddLoanStudent(r.data, 'facial');
             } catch (e) {
@@ -509,7 +508,7 @@ export function PrintFlowPage() {
         extra_student_ids: extraIds,
       });
       setDebits(res.data.debits);
-      setStep(res.data.debits.length > 1 ? 'stack' : 'confirm');
+      setStep('confirm');
     } catch (err) {
       setStackError(extractApiError(err));
     } finally {
@@ -574,7 +573,7 @@ export function PrintFlowPage() {
       const res = await api.post<IdentifyResult>(
         '/students/identify/manual',
         { registration_number: loanRegistration.trim() },
-        force ? { params: { force: 'true' } } : undefined,
+        { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_student_id: identifyResult?.student.id } },
       );
       validateAndAddLoanStudent(res.data, 'manual');
     } catch (err) {
@@ -596,7 +595,7 @@ export function PrintFlowPage() {
       const res = await api.post<IdentifyResult>(
         '/students/identify/rfid',
         { card_hex: loanCardHex.trim() },
-        force ? { params: { force: 'true' } } : undefined,
+        { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_student_id: identifyResult?.student.id } },
       );
       validateAndAddLoanStudent(res.data, 'rfid');
     } catch (err) {
@@ -877,22 +876,6 @@ export function PrintFlowPage() {
         </div>
       )}
 
-      {/* ── Step: Stack confirmation ── */}
-      {step === 'stack' && identifyResult && (
-        <div className="space-y-4 animate-slideUp">
-          <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-6">
-            <h2 className="text-[15px] font-semibold text-gray-900 mb-4">Empilhamento de Matrículas</h2>
-            <StackPreview debits={debits} totalSheets={parseInt(sheets)} />
-            <div className="flex gap-2 mt-5">
-              <Button variant="secondary" onClick={() => setStep('sheets')} size="sm">Voltar</Button>
-              <Button onClick={() => setStep('confirm')} className="flex-1 justify-center">
-                Confirmar empilhamento <ChevronRight size={15} />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Step: Final confirmation ── */}
       {step === 'confirm' && identifyResult && (
         <div className="space-y-4 animate-slideUp">
@@ -922,7 +905,7 @@ export function PrintFlowPage() {
             </div>
 
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setStep(debits.length > 1 ? 'stack' : 'sheets')} size="sm">
+              <Button variant="secondary" onClick={() => setStep('sheets')} size="sm">
                 Voltar
               </Button>
               <Button onClick={confirmPrint} loading={confirmLoading} className="flex-1 justify-center">

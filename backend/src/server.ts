@@ -12,6 +12,7 @@ import { reportRoutes } from './routes/reports.js';
 import { systemUserRoutes } from './routes/systemUsers.js';
 import { zabbixRoutes } from './routes/zabbix.js';
 import * as lyceumClient from './clients/lyceumClient.js';
+import * as situatorClient from './clients/situatorClient.js';
 import { requireAuth } from './middleware/auth.js';
 
 const app = Fastify({ logger: logger as never });
@@ -37,6 +38,10 @@ app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 app.get('/health/lyceum', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async () => {
   const available = await lyceumClient.isAvailable();
   return { available };
+});
+
+app.get('/health/situator', async () => {
+  return situatorClient.testConnection();
 });
 
 try {

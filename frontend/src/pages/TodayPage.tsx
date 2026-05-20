@@ -6,6 +6,7 @@ import { Search, Clock, Printer, TrendingUp, TrendingDown, Keyboard, CreditCard,
 import { SYNC_STATUS_LABELS } from '../lib/format';
 
 const PAGE_SIZE = 10;
+const MODAL_OPS_PAGE_SIZE = 5;
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -101,6 +102,7 @@ export function TodayPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [studentDetail, setStudentDetail] = useState<IdentifyResult | null>(null);
   const [fullHistory, setFullHistory] = useState<FullHistory | null>(null);
+  const [modalOpsPage, setModalOpsPage] = useState(1);
   const todayDate = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 
   useEffect(() => {
@@ -121,6 +123,7 @@ export function TodayPage() {
     setDetailLoading(true);
     setStudentDetail(null);
     setFullHistory(null);
+    setModalOpsPage(1);
     try {
       const [detailRes, histRes] = await Promise.all([
         api.post<IdentifyResult>('/students/identify/manual', { registration_number: s.registration_number }),
@@ -399,58 +402,86 @@ export function TodayPage() {
             })()}
 
             {/* Operations as primary */}
-            {fullHistory.as_primary.length > 0 && (
-              <div>
-                <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">
-                  Operações realizadas hoje
-                </p>
-                <div className="space-y-2">
-                  {fullHistory.as_primary.map((op) => (
-                    <div key={op.id} className="rounded-xl border border-gray-100 overflow-hidden">
-                      <div className="flex items-center justify-between px-4 py-2 bg-gray-50/70 border-b border-gray-100">
-                        <span className="text-[12px] text-gray-500">
-                          Op. #{op.id} · {formatTime(op.created_at)} · {op.operator_login}
-                        </span>
-                        <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
-                      </div>
-                      {op.entries.map((e) => {
-                        const parts = e.student_name.trim().split(/\s+/);
-                        const displayName = parts.length > 1
-                          ? `${parts[0]} ${parts[parts.length - 1]}`
-                          : parts[0];
-                        return (
-                          <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
-                                e.student_id === selectedStudent?.id
-                                  ? 'bg-blue-50 text-blue-700'
-                                  : 'bg-amber-50 text-amber-700'
-                              }`}>
-                                {e.student_id === selectedStudent?.id ? 'Própria' : 'Empréstimo'}
-                              </span>
-                              {e.student_id !== selectedStudent?.id && (
-                                <button
-                                  onClick={(ev) => { ev.stopPropagation(); openDetailByEntry(e.student_id, e.registration_number, e.student_name); }}
-                                  className="min-w-0 text-left group"
-                                >
-                                  <p className="text-[12px] font-medium text-gray-800 leading-tight group-hover:text-blue-600 transition-colors">{displayName}</p>
-                                  <p className="text-[10px] text-gray-400 leading-tight truncate">
-                                    {e.registration_number}
-                                    {e.course ? ` · ${e.course}` : ''}
-                                    {e.period ? ` · ${e.period}` : ''}
-                                  </p>
-                                </button>
-                              )}
+            {fullHistory.as_primary.length > 0 && (() => {
+              const totalOpsPages = Math.max(1, Math.ceil(fullHistory.as_primary.length / MODAL_OPS_PAGE_SIZE));
+              const safeOpsPage = Math.min(modalOpsPage, totalOpsPages);
+              const pagedOps = fullHistory.as_primary.slice((safeOpsPage - 1) * MODAL_OPS_PAGE_SIZE, safeOpsPage * MODAL_OPS_PAGE_SIZE);
+              return (
+                <div>
+                  <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    Operações realizadas hoje
+                  </p>
+                  <div className="space-y-2">
+                    {pagedOps.map((op) => (
+                      <div key={op.id} className="rounded-xl border border-gray-100 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2 bg-gray-50/70 border-b border-gray-100">
+                          <span className="text-[12px] text-gray-500">
+                            Op. #{op.id} · {formatTime(op.created_at)} · {op.operator_login}
+                          </span>
+                          <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
+                        </div>
+                        {op.entries.map((e) => {
+                          const parts = e.student_name.trim().split(/\s+/);
+                          const displayName = parts.length > 1
+                            ? `${parts[0]} ${parts[parts.length - 1]}`
+                            : parts[0];
+                          return (
+                            <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
+                                  e.student_id === selectedStudent?.id
+                                    ? 'bg-blue-50 text-blue-700'
+                                    : 'bg-amber-50 text-amber-700'
+                                }`}>
+                                  {e.student_id === selectedStudent?.id ? 'Própria' : 'Empréstimo'}
+                                </span>
+                                {e.student_id !== selectedStudent?.id && (
+                                  <button
+                                    onClick={(ev) => { ev.stopPropagation(); openDetailByEntry(e.student_id, e.registration_number, e.student_name); }}
+                                    className="min-w-0 text-left group"
+                                  >
+                                    <p className="text-[12px] font-medium text-gray-800 leading-tight group-hover:text-blue-600 transition-colors">{displayName}</p>
+                                    <p className="text-[10px] text-gray-400 leading-tight truncate">
+                                      {e.registration_number}
+                                      {e.course ? ` · ${e.course}` : ''}
+                                      {e.period ? ` · ${e.period}` : ''}
+                                    </p>
+                                  </button>
+                                )}
+                              </div>
+                              <span className="text-[13px] font-semibold text-gray-900 shrink-0">{e.sheets} folhas</span>
                             </div>
-                            <span className="text-[13px] font-semibold text-gray-900 shrink-0">{e.sheets} folhas</span>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                  {totalOpsPages > 1 && (
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+                      <p className="text-[11px] text-gray-400">
+                        {(safeOpsPage - 1) * MODAL_OPS_PAGE_SIZE + 1}–{Math.min(safeOpsPage * MODAL_OPS_PAGE_SIZE, fullHistory.as_primary.length)} de {fullHistory.as_primary.length}
+                      </p>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setModalOpsPage(Math.max(1, safeOpsPage - 1))}
+                          disabled={safeOpsPage === 1}
+                          className="px-2 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Anterior
+                        </button>
+                        <button
+                          onClick={() => setModalOpsPage(Math.min(totalOpsPages, safeOpsPage + 1))}
+                          disabled={safeOpsPage === totalOpsPages}
+                          className="px-2 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Próxima
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Loans given */}
             {fullHistory.as_lender.length > 0 && (

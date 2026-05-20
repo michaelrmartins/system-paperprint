@@ -69,6 +69,25 @@ async function migrate() {
     t.timestamp('created_at', { useTz: true }).defaultTo(db.fn.now());
   });
 
+  await createTableIfMissing('invalid_document_attempts', (t) => {
+    t.increments('id').primary();
+    t.string('document', 50).notNullable();
+    t.string('situation_detail', 100).notNullable();
+    t.enu('context', ['primary', 'loan']).notNullable().defaultTo('primary');
+    t.enu('identify_method', ['manual', 'rfid', 'facial']).notNullable().defaultTo('manual');
+    t.integer('operator_id').notNullable().references('id').inTable('system_users');
+    t.integer('primary_student_id').nullable().references('id').inTable('students');
+    t.timestamp('created_at', { useTz: true }).defaultTo(db.fn.now());
+  });
+
+  // Add primary_student_id to invalid_document_attempts if missing (for loan context traceability)
+  const hasInvalidDocPrimaryStudentId = await db.schema.hasColumn('invalid_document_attempts', 'primary_student_id');
+  if (!hasInvalidDocPrimaryStudentId) {
+    await db.schema.table('invalid_document_attempts', (t) => {
+      t.integer('primary_student_id').nullable().references('id').inTable('students');
+    });
+  }
+
   // Add identify_method column to print_operations if missing
   const hasIdentifyMethod = await db.schema.hasColumn('print_operations', 'identify_method');
   if (!hasIdentifyMethod) {

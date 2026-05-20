@@ -211,4 +211,28 @@ export async function reportRoutes(app: FastifyInstance) {
       )
       .orderBy('total_sheets', 'desc');
   });
+
+  // Blocked enrollment status attempts — for audit/compliance reports
+  app.get('/reports/invalid-documents', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
+    const { start, end } = req.query as { start?: string; end?: string };
+    return db('invalid_document_attempts')
+      .join('system_users', 'invalid_document_attempts.operator_id', 'system_users.id')
+      .leftJoin('students as primary_s', 'invalid_document_attempts.primary_student_id', 'primary_s.id')
+      .modify((q) => {
+        if (start) q.where('invalid_document_attempts.created_at', '>=', start);
+        if (end) q.where('invalid_document_attempts.created_at', '<=', `${end}T23:59:59`);
+      })
+      .select(
+        'invalid_document_attempts.id',
+        'invalid_document_attempts.document',
+        'invalid_document_attempts.situation_detail',
+        'invalid_document_attempts.context',
+        'invalid_document_attempts.identify_method',
+        db.raw(`to_char(invalid_document_attempts.created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') as created_at`),
+        'system_users.login as operator_login',
+        'primary_s.name as primary_student_name',
+        'primary_s.registration_number as primary_student_registration',
+      )
+      .orderBy('invalid_document_attempts.created_at', 'desc');
+  });
 }

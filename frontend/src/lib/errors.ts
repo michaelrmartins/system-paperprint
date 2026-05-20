@@ -8,6 +8,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   MISSING_IMAGE: 'Imagem não capturada.',
   STUDENT_NOT_FOUND: 'Aluno não encontrado no sistema acadêmico.',
   STUDENT_INACTIVE: 'Aluno inativo (Desativado/Concluído). Operação não autorizada.',
+  STUDENT_NOT_ENROLLED: 'Situação acadêmica irregular. Aluno não autorizado a imprimir.',
   LYCEUM_UNAVAILABLE: 'Sistema acadêmico (Lyceum) indisponível. Tente novamente em instantes.',
   SITUATOR_UNAVAILABLE: 'Sistema de carteirinhas (Situator) indisponível. Tente a matrícula manual.',
   VECTOR_AI_UNAVAILABLE: 'Sistema de reconhecimento facial indisponível. Tente outro método.',
@@ -36,9 +37,15 @@ export function getErrorMessage(errorCode: string): string {
 
 export function extractApiError(err: unknown): string {
   if (err && typeof err === 'object' && 'response' in err) {
-    const response = (err as { response?: { data?: { error?: string; message?: string } } }).response;
+    const response = (err as { response?: { data?: { error?: string; message?: string; situation_detail?: string } } }).response;
     const code = response?.data?.error || response?.data?.message;
-    if (code) return getErrorMessage(code);
+    if (code) {
+      if (code === 'STUDENT_NOT_ENROLLED') {
+        const detail = response?.data?.situation_detail;
+        return `Situação "${detail || 'irregular'}" — aluno não autorizado a imprimir.`;
+      }
+      return getErrorMessage(code);
+    }
   }
   if (err instanceof Error) return err.message;
   return 'Erro desconhecido. Tente novamente.';
