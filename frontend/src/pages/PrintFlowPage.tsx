@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { CreditCard, Keyboard, Camera, ChevronRight, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { CreditCard, Keyboard, Camera, ChevronRight, Plus, Trash2, RefreshCw, ArrowDown, ArrowUp, Clock, Printer, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../lib/api';
 import { IdentifyResult, StackedDebit } from '../types';
 import { StudentCard } from '../components/StudentCard';
@@ -8,6 +8,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { extractApiError } from '../lib/errors';
+import { SYNC_STATUS_LABELS } from '../lib/format';
 
 // Interval between recognition requests in live mode.
 // Industry standard for server-based face recognition: 250–500 ms.
@@ -28,6 +29,52 @@ interface FaceErrData {
   error?: string;
   box?: FaceBox;
   registration_number?: string;
+}
+
+interface RecentEntry { id: number; type: 'own' | 'borrowed'; sheets: number; student_id: number }
+interface RecentOperation {
+  id: number;
+  student_name: string;
+  registration_number: string;
+  student_id: number;
+  student_course: string;
+  student_period: string;
+  total_sheets: number;
+  identify_method: 'manual' | 'rfid' | 'facial';
+  created_at: string;
+  entries: RecentEntry[];
+}
+
+interface PrimaryEntry {
+  id: number; student_id: number; sheets: number; type: 'own' | 'borrowed';
+  student_name: string; registration_number: string; course?: string; period?: string;
+}
+interface PrimaryOperation {
+  id: number; total_sheets: number; status: string; created_at: string;
+  operator_login: string; own_sheets: number; borrowed_sheets: number; entries: PrimaryEntry[];
+}
+interface LoanEntry {
+  id: number; sheets: number; created_at: string; operation_id: number;
+  operation_total: number; primary_student_id: number; primary_student_name: string;
+  primary_registration: string; operator_login: string;
+}
+interface FullHistory { as_primary: PrimaryOperation[]; as_lender: LoanEntry[] }
+
+const METHOD_ICONS = { manual: Keyboard, rfid: CreditCard, facial: Camera } as const;
+
+const METHOD_BADGE_CLASS: Record<string, string> = {
+  manual: 'bg-gray-100 text-gray-500',
+  rfid:   'bg-blue-50 text-blue-600',
+  facial: 'bg-purple-50 text-purple-600',
+};
+
+function formatModalTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function shortName(full: string): string {
+  const parts = full.trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
 }
 
 function onlyNumbers(value: string): string {
@@ -107,7 +154,20 @@ export function PrintFlowPage() {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [doneOperationId, setDoneOperationId] = useState<number | null>(null);
   const [errorModal, setErrorModal] = useState('');
+
+  const [recentOps, setRecentOps] = useState<RecentOperation[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
   const [notInLyceumModal, setNotInLyceumModal] = useState<{ registration_number: string; confirm: () => void } | null>(null);
+
+  // Student detail modal (triggered from recent ops list)
+  const [selectedRecent, setSelectedRecent] = useState<{ id: number; registration_number: string; name: string } | null>(null);
+  const [recentDetailLoading, setRecentDetailLoading] = useState(false);
+  const [recentStudentDetail, setRecentStudentDetail] = useState<IdentifyResult | null>(null);
+  const [recentFullHistory, setRecentFullHistory] = useState<FullHistory | null>(null);
+  const [recentModalOpsPage, setRecentModalOpsPage] = useState(1);
+
+  // Done step auto-reset countdown
+  const [doneCountdown, setDoneCountdown] = useState(10);
 
   const [addingLoan, setAddingLoan] = useState(false);
   const [loanIdentifyMethod, setLoanIdentifyMethod] = useState<IdentifyMethod>('manual');
@@ -151,6 +211,22 @@ export function PrintFlowPage() {
       registrationInputRef.current?.focus();
     }
   }, [step, identifyMethod]);
+
+  const loadRecentOps = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const res = await api.get<{ operations: RecentOperation[] }>('/print/operations/recent?limit=10');
+      setRecentOps(res.data.operations);
+    } catch {
+      // silently fail — list is non-critical
+    } finally {
+      setRecentLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === 'identify') loadRecentOps();
+  }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Camera utilities ──────────────────────────────────────────────────────
 
@@ -637,7 +713,7 @@ export function PrintFlowPage() {
     }
   };
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setStep('identify');
     setRegistration('');
     setCardHex('');
@@ -650,13 +726,45 @@ export function PrintFlowPage() {
     setStackError('');
     setDoneOperationId(null);
     stopCamera();
-  };
+  }, [stopCamera]);
 
   const switchMethod = (method: IdentifyMethod) => {
     setIdentifyMethod(method);
     setIdentifyError('');
     if (method !== 'facial') stopCamera();
   };
+
+  const openRecentDetail = async (op: RecentOperation) => {
+    setSelectedRecent({ id: op.student_id, registration_number: op.registration_number, name: op.student_name });
+    setRecentDetailLoading(true);
+    setRecentStudentDetail(null);
+    setRecentFullHistory(null);
+    setRecentModalOpsPage(1);
+    const todayDate = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+    try {
+      const [detailRes, histRes] = await Promise.all([
+        api.post<IdentifyResult>('/students/identify/manual', { registration_number: op.registration_number }),
+        api.get<FullHistory>(`/students/${op.student_id}/full-history`, { params: { date: todayDate } }),
+      ]);
+      setRecentStudentDetail(detailRes.data);
+      setRecentFullHistory(histRes.data);
+    } finally {
+      setRecentDetailLoading(false);
+    }
+  };
+
+  // Auto-reset 10 seconds after a successful print
+  useEffect(() => {
+    if (step !== 'done') return;
+    setDoneCountdown(10);
+    const interval = setInterval(() => {
+      setDoneCountdown((prev) => {
+        if (prev <= 1) { clearInterval(interval); reset(); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step, reset]);
 
   const handleCameraCycle = useCallback(() => {
     if (cameras.length > 1) {
@@ -788,6 +896,64 @@ export function PrintFlowPage() {
         </div>
       )}
 
+      {/* ── Recent operations list (identify step only) ── */}
+      {step === 'identify' && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-1">Últimas operações</p>
+
+          {recentLoading ? (
+            <div className="flex justify-center py-6"><Spinner size="sm" /></div>
+          ) : recentOps.length === 0 ? (
+            <p className="text-center text-[13px] text-gray-400 py-4">Nenhuma operação registrada ainda.</p>
+          ) : (
+            <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass divide-y divide-gray-100/60 overflow-hidden">
+              {recentOps.map((op) => {
+                const hasBorrowed = op.entries.some((e) => e.type === 'borrowed');
+                const MethodIcon = METHOD_ICONS[op.identify_method] ?? Keyboard;
+                const badgeClass = METHOD_BADGE_CLASS[op.identify_method] ?? 'bg-gray-100 text-gray-500';
+                const time = new Date(op.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div key={op.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/40 transition-colors">
+                    {/* Identify method badge with color */}
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${badgeClass}`}>
+                      <MethodIcon size={13} />
+                    </div>
+
+                    {/* Student info — name is clickable */}
+                    <div className="flex-1 min-w-0">
+                      <button
+                        onClick={() => openRecentDetail(op)}
+                        className="text-left group"
+                      >
+                        <p className="text-[13px] font-semibold text-gray-900 truncate leading-tight group-hover:text-blue-600 transition-colors">
+                          {shortName(op.student_name)}
+                        </p>
+                      </button>
+                      <p className="text-[11px] text-gray-400 truncate leading-snug mt-0.5">
+                        {op.registration_number}
+                        {op.student_course ? ` · ${op.student_course}` : ''}
+                        {op.student_period ? ` · ${op.student_period}` : ''}
+                      </p>
+                    </div>
+
+                    {/* Sheets + direction + time */}
+                    <div className="flex flex-col items-end gap-0.5 shrink-0">
+                      <div className="flex items-center gap-1">
+                        <ArrowDown size={12} className="text-emerald-500" />
+                        <span className="text-[13px] font-bold text-gray-900">{op.total_sheets}</span>
+                        <span className="text-[11px] text-gray-400">fls</span>
+                        {hasBorrowed && <ArrowUp size={12} className="text-amber-400" />}
+                      </div>
+                      <span className="text-[10px] text-gray-300">{time}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Step: Sheets ── */}
       {step === 'sheets' && identifyResult && (
         <div className="space-y-4 animate-slideUp">
@@ -908,7 +1074,7 @@ export function PrintFlowPage() {
               <Button variant="secondary" onClick={() => setStep('sheets')} size="sm">
                 Voltar
               </Button>
-              <Button onClick={confirmPrint} loading={confirmLoading} className="flex-1 justify-center">
+              <Button onClick={confirmPrint} loading={confirmLoading} className="flex-1 justify-center" autoFocus>
                 Registrar impressão
               </Button>
             </div>
@@ -926,9 +1092,19 @@ export function PrintFlowPage() {
           </div>
           <h2 className="text-[17px] font-semibold text-gray-900">Impressão registrada</h2>
           <p className="text-[13px] text-gray-500 mt-1">Operação #{doneOperationId}</p>
-          <Button onClick={reset} className="mt-6 mx-auto">
+          <Button onClick={reset} className="mt-6 mx-auto" autoFocus>
             Nova operação
           </Button>
+          <p className="text-[11px] text-gray-300 mt-3">
+            Voltando automaticamente em {doneCountdown}s
+          </p>
+          {/* Countdown progress bar */}
+          <div className="mt-2 mx-auto w-32 h-0.5 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gray-300 rounded-full transition-none"
+              style={{ width: `${(doneCountdown / 10) * 100}%` }}
+            />
+          </div>
         </div>
       )}
 
@@ -1070,6 +1246,150 @@ export function PrintFlowPage() {
         <Button onClick={() => setErrorModal('')} className="mt-4 w-full justify-center" size="sm">
           Fechar
         </Button>
+      </Modal>
+
+      {/* ── Recent operation student detail modal ── */}
+      <Modal
+        open={!!selectedRecent}
+        onClose={() => setSelectedRecent(null)}
+        title="Detalhes do Aluno"
+        size="xl"
+      >
+        {recentDetailLoading ? (
+          <div className="flex justify-center py-8"><Spinner /></div>
+        ) : recentStudentDetail && recentFullHistory ? (
+          <div className="space-y-5">
+            {/* Header */}
+            <div className="flex gap-4">
+              <div className="shrink-0">
+                {recentStudentDetail.photo ? (
+                  <img
+                    src={`data:image/jpeg;base64,${recentStudentDetail.photo}`}
+                    alt={recentStudentDetail.student.name}
+                    className="w-16 h-16 rounded-xl object-cover border border-white/60 shadow-sm"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-xl font-semibold">
+                    {recentStudentDetail.student.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[15px] font-semibold text-gray-900">{recentStudentDetail.student.name}</p>
+                <p className="text-[12px] text-gray-500 mt-0.5">{recentStudentDetail.student.registration_number}</p>
+                {recentStudentDetail.student.course && (
+                  <p className="text-[12px] text-gray-500">
+                    {recentStudentDetail.student.course}
+                    {recentStudentDetail.student.period && ` · ${recentStudentDetail.student.period}`}
+                  </p>
+                )}
+                {recentStudentDetail.student.sync_status !== 'synced' && (
+                  <span className="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                    {SYNC_STATUS_LABELS[recentStudentDetail.student.sync_status]}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Quota summary */}
+            {(() => {
+              const totalPrintedToday = recentFullHistory.as_primary.reduce((a, op) => a + op.total_sheets, 0);
+              const ownSheetsTotal = recentFullHistory.as_primary.reduce((a, op) => a + op.own_sheets, 0);
+              const receivedTotal = recentFullHistory.as_primary.reduce((a, op) => a + op.borrowed_sheets, 0);
+              const lentTotal = recentFullHistory.as_lender.reduce((a, e) => a + e.sheets, 0);
+              return (
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { label: 'Total impresso', value: totalPrintedToday, icon: <Printer size={13} />, color: 'text-gray-700' },
+                    { label: 'Cota própria', value: ownSheetsTotal, icon: <Clock size={13} />, color: 'text-blue-600' },
+                    { label: 'Emp. recebido', value: receivedTotal, icon: <TrendingDown size={13} />, color: 'text-amber-600' },
+                    { label: 'Cota cedida', value: lentTotal, icon: <TrendingUp size={13} />, color: 'text-emerald-600' },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col items-center p-3 bg-gray-50/80 rounded-xl border border-gray-100">
+                      <span className={`${item.color} mb-1`}>{item.icon}</span>
+                      <p className={`text-[18px] font-bold ${item.color}`}>{item.value}</p>
+                      <p className="text-[10px] text-gray-500 text-center leading-tight mt-0.5">{item.label}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Operations as primary */}
+            {recentFullHistory.as_primary.length > 0 && (() => {
+              const totalOpsPages = Math.max(1, Math.ceil(recentFullHistory.as_primary.length / 5));
+              const safeOpsPage = Math.min(recentModalOpsPage, totalOpsPages);
+              const pagedOps = recentFullHistory.as_primary.slice((safeOpsPage - 1) * 5, safeOpsPage * 5);
+              return (
+                <div>
+                  <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Operações realizadas hoje</p>
+                  <div className="space-y-2">
+                    {pagedOps.map((op) => (
+                      <div key={op.id} className="rounded-xl border border-gray-100 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2 bg-gray-50/70 border-b border-gray-100">
+                          <span className="text-[12px] text-gray-500">Op. #{op.id} · {formatModalTime(op.created_at)} · {op.operator_login}</span>
+                          <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
+                        </div>
+                        {op.entries.map((e) => {
+                          const parts = e.student_name.trim().split(/\s+/);
+                          const displayName = parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
+                          return (
+                            <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${e.student_id === selectedRecent?.id ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                  {e.student_id === selectedRecent?.id ? 'Própria' : 'Empréstimo'}
+                                </span>
+                                {e.student_id !== selectedRecent?.id && (
+                                  <p className="text-[12px] font-medium text-gray-800 leading-tight">{displayName}</p>
+                                )}
+                              </div>
+                              <span className="text-[13px] font-semibold text-gray-900 shrink-0">{e.sheets} folhas</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                  {totalOpsPages > 1 && (
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+                      <p className="text-[11px] text-gray-400">
+                        {(safeOpsPage - 1) * 5 + 1}–{Math.min(safeOpsPage * 5, recentFullHistory.as_primary.length)} de {recentFullHistory.as_primary.length}
+                      </p>
+                      <div className="flex gap-1">
+                        <button onClick={() => setRecentModalOpsPage(Math.max(1, safeOpsPage - 1))} disabled={safeOpsPage === 1}
+                          className="px-2 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                          Anterior
+                        </button>
+                        <button onClick={() => setRecentModalOpsPage(Math.min(totalOpsPages, safeOpsPage + 1))} disabled={safeOpsPage === totalOpsPages}
+                          className="px-2 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                          Próxima
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Loans given */}
+            {recentFullHistory.as_lender.length > 0 && (
+              <div>
+                <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Cota cedida a outros alunos</p>
+                <div className="rounded-xl border border-gray-100 overflow-hidden divide-y divide-gray-100">
+                  {recentFullHistory.as_lender.map((e) => (
+                    <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                      <div>
+                        <p className="text-[13px] font-medium text-gray-900">{e.primary_student_name}</p>
+                        <p className="text-[11px] text-gray-400">{e.primary_registration} · op. #{e.operation_id}</p>
+                      </div>
+                      <span className="text-[13px] font-bold text-emerald-700">{e.sheets} folhas</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </Modal>
 
       {/* ── Not in Lyceum confirmation modal ── */}

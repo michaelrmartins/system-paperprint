@@ -13,7 +13,7 @@ import { Search, ChevronRight, ChevronDown } from 'lucide-react';
 type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'daily' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit' | 'invalid-docs';
 
 interface CourseRow    { course: string; total_sheets: string }
-interface PeriodRow    { period: string; total_sheets: string }
+interface PeriodRow    { period: string; course: string; total_sheets: string }
 interface TopRow       { id: number; name: string; registration_number: string; course: string; period: string; total_sheets: string }
 interface MonthlyRow   { month: number; total_sheets: string; total_operations: string }
 interface DailyRow     { day: string; total_sheets: string; total_operations: string }
@@ -38,12 +38,15 @@ const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov
 const TYPE_LABEL: Record<string, string> = { own: 'Impressões próprias', borrowed: 'Cotas emprestadas' };
 
 // ─── Chart factories ──────────────────────────────────────────────────────────
-function hBar(categories: string[], values: number[], name = 'Folhas') {
+function hBar(categories: string[], values: number[], name = 'Folhas', gridLeft: number | string = 6) {
+  const grid = typeof gridLeft === 'number' && gridLeft === 6
+    ? { left: 6, right: 20, top: 6, bottom: 6, containLabel: true }
+    : { left: gridLeft, right: 20, top: 6, bottom: 6 };
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 6, right: 20, top: 6, bottom: 6, containLabel: true },
+    grid,
     xAxis: { type: 'value', splitLine: { lineStyle: { color: '#f5f5f7', type: 'dashed' as const } }, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { fontSize: 10, color: '#8e8e93' } },
-    yAxis: { type: 'category', data: categories, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { fontSize: 11, color: '#3a3a3c', overflow: 'truncate' as const, width: 120 } },
+    yAxis: { type: 'category', data: categories, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { fontSize: 11, color: '#3a3a3c' } },
     series: [{ name, type: 'bar', data: values, itemStyle: { color: '#1c1c1e', borderRadius: [0, 3, 3, 0] }, barMaxWidth: 18 }],
   };
 }
@@ -165,21 +168,21 @@ export function ReportsPage() {
     if (tab !== 'history') load();
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const togglePeriod = async (period: string) => {
+  const togglePeriod = async (key: string, period: string, course: string) => {
     const next = new Set(expandedPeriods);
-    if (next.has(period)) { next.delete(period); }
+    if (next.has(key)) { next.delete(key); }
     else {
-      next.add(period);
-      if (!periodStudents[period]) {
-        setPeriodStudentsLoading(p => ({ ...p, [period]: true }));
+      next.add(key);
+      if (!periodStudents[key]) {
+        setPeriodStudentsLoading(p => ({ ...p, [key]: true }));
         try {
-          const params = new URLSearchParams({ period });
+          const params = new URLSearchParams({ period, course });
           if (start) params.set('start', start);
           if (end) params.set('end', end);
           const res = await api.get<PeriodStudent[]>(`/reports/period-students?${params}`);
-          setPeriodStudents(p => ({ ...p, [period]: res.data }));
+          setPeriodStudents(p => ({ ...p, [key]: res.data }));
         } finally {
-          setPeriodStudentsLoading(p => ({ ...p, [period]: false }));
+          setPeriodStudentsLoading(p => ({ ...p, [key]: false }));
         }
       }
     }
@@ -349,25 +352,30 @@ export function ReportsPage() {
       {/* ── Period ── */}
       {!loading && tab === 'period' && data.length > 0 && (() => {
         const rows = data as PeriodRow[];
+        const label = (r: PeriodRow) => r.course ? `${r.period || '—'} - ${r.course}` : (r.period || '—');
         const rev = [...rows].reverse();
         return (
           <div className="space-y-4">
             <Card>
-              <ReactECharts option={hBar(rev.map(r => r.period || '—'), rev.map(r => parseInt(r.total_sheets)))}
+              <ReactECharts option={hBar(rev.map(label), rev.map(r => parseInt(r.total_sheets)), 'Folhas', 185)}
                 style={{ height: `${Math.max(180, rows.length * 36)}px` }} opts={{ renderer: 'svg' }} />
             </Card>
             <TableWrap>
               {rows.map(r => {
-                const isOpen = expandedPeriods.has(r.period);
-                const students = periodStudents[r.period] ?? [];
-                const loadingSt = periodStudentsLoading[r.period];
+                const key = `${r.period}|${r.course}`;
+                const isOpen = expandedPeriods.has(key);
+                const students = periodStudents[key] ?? [];
+                const loadingSt = periodStudentsLoading[key];
                 return (
-                  <div key={r.period} className="border-b border-gray-100/80 last:border-0">
-                    <button onClick={() => togglePeriod(r.period)}
+                  <div key={key} className="border-b border-gray-100/80 last:border-0">
+                    <button onClick={() => togglePeriod(key, r.period, r.course)}
                       className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50/50 transition-colors text-left">
                       <div className="flex items-center gap-2">
                         {isOpen ? <ChevronDown size={14} className="text-gray-400 shrink-0" /> : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
-                        <span className="text-[14px] font-medium text-gray-900">{r.period || '—'}</span>
+                        <div>
+                          <span className="text-[14px] font-medium text-gray-900">{r.period || '—'}</span>
+                          {r.course && <span className="ml-2 text-[12px] text-gray-400">{r.course}</span>}
+                        </div>
                       </div>
                       <span className="text-[14px] font-bold text-gray-900">{r.total_sheets} folhas</span>
                     </button>

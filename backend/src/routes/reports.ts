@@ -28,8 +28,8 @@ export async function reportRoutes(app: FastifyInstance) {
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', end);
       })
-      .groupBy('students.period')
-      .select('students.period', db.raw('SUM(entries.sheets) as total_sheets'))
+      .groupBy('students.course', 'students.period')
+      .select('students.course', 'students.period', db.raw('SUM(entries.sheets) as total_sheets'))
       .orderBy('total_sheets', 'desc');
   });
 
@@ -190,15 +190,16 @@ export async function reportRoutes(app: FastifyInstance) {
       .orderBy('day');
   });
 
-  // Students within a period (for expandable rows)
+  // Students within a period+course combo (for expandable rows)
   app.get('/reports/period-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
-    const { period, start, end } = req.query as { period?: string; start?: string; end?: string };
+    const { period, course, start, end } = req.query as { period?: string; course?: string; start?: string; end?: string };
     if (!period) return [];
     return db('print_operations')
       .join('students', 'print_operations.student_id', 'students.id')
       .join('entries', 'entries.print_operation_id', 'print_operations.id')
       .where('students.period', period)
       .modify((q) => {
+        if (course) q.where('students.course', course);
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', `${end}T23:59:59`);
       })

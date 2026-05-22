@@ -109,6 +109,8 @@ export async function printRoutes(app: FastifyInstance) {
         'print_operations.*',
         'students.name as student_name',
         'students.registration_number',
+        'students.course as student_course',
+        'students.period as student_period',
         'system_users.login as operator_login'
       )
       .orderBy('print_operations.created_at', 'desc')
