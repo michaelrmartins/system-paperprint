@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { CreditCard, Keyboard, Camera, ChevronRight, Plus, Trash2, RefreshCw, ArrowDown, ArrowUp, Clock, Printer, TrendingUp, TrendingDown } from 'lucide-react';
 import api from '../lib/api';
 import { IdentifyResult, StackedDebit } from '../types';
+import { useSSE } from '../hooks/useSSE';
 import { StudentCard } from '../components/StudentCard';
 import { Modal } from '../components/Modal';
 import { Button } from '../components/Button';
@@ -227,6 +228,11 @@ export function PrintFlowPage() {
   useEffect(() => {
     if (step === 'identify') loadRecentOps();
   }, [step]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh recent ops in real time when another machine registers a print
+  useSSE('print_registered', () => {
+    if (step === 'identify') loadRecentOps();
+  });
 
   // ── Camera utilities ──────────────────────────────────────────────────────
 

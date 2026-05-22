@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { registerPrint, registerContingencyPrint, calculateStackedDebits, adjustEntry } from '../services/printService.js';
 import { JwtPayload } from '../types/index.js';
 import { db } from '../db/knex.js';
+import { broadcast } from '../lib/sseEmitter.js';
 
 export async function printRoutes(app: FastifyInstance) {
   // Preview stacked debits before confirming
@@ -51,6 +52,7 @@ export async function printRoutes(app: FastifyInstance) {
         stacked_debits,
         identify_method: identify_method || 'manual',
       });
+      broadcast('print_registered', { operation_id: operation.id });
       return { operation_id: operation.id, status: operation.status };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
@@ -74,6 +76,7 @@ export async function printRoutes(app: FastifyInstance) {
     }
 
     const operation = await registerContingencyPrint(operator.sub, registration_number, sheets);
+    broadcast('print_registered', { operation_id: operation.id });
     return { operation_id: operation.id, status: operation.status };
   });
 
@@ -105,6 +108,7 @@ export async function printRoutes(app: FastifyInstance) {
     const operations = await db('print_operations')
       .join('students', 'print_operations.student_id', 'students.id')
       .join('system_users', 'print_operations.operator_id', 'system_users.id')
+      .whereRaw("print_operations.created_at >= CURRENT_DATE")
       .select(
         'print_operations.*',
         'students.name as student_name',

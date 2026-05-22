@@ -14,6 +14,7 @@ import { zabbixRoutes } from './routes/zabbix.js';
 import * as lyceumClient from './clients/lyceumClient.js';
 import * as situatorClient from './clients/situatorClient.js';
 import { requireAuth } from './middleware/auth.js';
+import { addClient, removeClient } from './lib/sseEmitter.js';
 
 const app = Fastify({ logger: logger as never });
 
@@ -33,6 +34,45 @@ await app.register(settingsRoutes);
 await app.register(reportRoutes);
 await app.register(systemUserRoutes);
 await app.register(zabbixRoutes);
+
+// SSE stream — clients subscribe here for real-time push events
+app.get('/events/stream', async (req, reply) => {
+  const { token } = req.query as { token?: string };
+  if (!token) {
+    return reply.status(401).send({ error: 'MISSING_TOKEN' });
+  }
+  try {
+    app.jwt.verify(token);
+  } catch {
+    return reply.status(401).send({ error: 'INVALID_TOKEN' });
+  }
+
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'X-Accel-Buffering': 'no',
+    Connection: 'keep-alive',
+  });
+  reply.raw.write(':\n\n'); // initial comment to open the stream
+
+  addClient(reply);
+
+  const keepAlive = setInterval(() => {
+    try {
+      reply.raw.write(':ping\n\n');
+    } catch {
+      clearInterval(keepAlive);
+    }
+  }, 25_000);
+
+  req.raw.on('close', () => {
+    clearInterval(keepAlive);
+    removeClient(reply);
+  });
+
+  // never resolve — keep the connection open
+  await new Promise<void>((resolve) => req.raw.on('close', resolve));
+});
 
 app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 app.get('/health/lyceum', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async () => {

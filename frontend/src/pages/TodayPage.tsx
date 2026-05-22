@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/api';
 import { Spinner } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { Search, Clock, Printer, TrendingUp, TrendingDown, Keyboard, CreditCard, Camera } from 'lucide-react';
 import { SYNC_STATUS_LABELS } from '../lib/format';
+import { useSSE } from '../hooks/useSSE';
 
 const PAGE_SIZE = 10;
 const MODAL_OPS_PAGE_SIZE = 5;
@@ -105,16 +106,20 @@ export function TodayPage() {
   const [modalOpsPage, setModalOpsPage] = useState(1);
   const todayDate = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 
+  const fetchToday = useCallback(() => {
+    api.get<TodayStudent[]>('/students/today').then((r) => setStudents(r.data)).catch(() => {});
+  }, []);
+
   useEffect(() => {
     api.get<TodayStudent[]>('/students/today')
       .then((r) => setStudents(r.data))
       .finally(() => setLoading(false));
 
-    const id = setInterval(() => {
-      api.get<TodayStudent[]>('/students/today').then((r) => setStudents(r.data)).catch(() => {});
-    }, 30_000);
+    const id = setInterval(fetchToday, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [fetchToday]);
+
+  useSSE('print_registered', fetchToday);
 
   useEffect(() => { setPage(1); }, [search, filter]);
 
