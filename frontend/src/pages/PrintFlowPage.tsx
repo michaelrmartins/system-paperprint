@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { CreditCard, Keyboard, Camera, ChevronRight, Plus, Trash2, RefreshCw, ArrowDown, ArrowUp, Clock, Printer, TrendingUp, TrendingDown } from 'lucide-react';
+import { CreditCard, Keyboard, Camera, ChevronRight, Plus, Trash2, RefreshCw, ArrowDown, ArrowUp, Clock, Printer, TrendingUp, TrendingDown, Briefcase, AlertTriangle, FileX } from 'lucide-react';
 import api from '../lib/api';
-import { IdentifyResult, StackedDebit } from '../types';
+import { IdentifyResult, StackedDebit, getUserIdentifier, getUserDetail } from '../types';
+import { detectUserType } from '../lib/documentUtils';
 import { useSSE } from '../hooks/useSSE';
 import { StudentCard } from '../components/StudentCard';
 import { Modal } from '../components/Modal';
@@ -30,25 +31,35 @@ interface FaceErrData {
   error?: string;
   box?: FaceBox;
   registration_number?: string;
+  employee_code?: string;
 }
 
-interface RecentEntry { id: number; type: 'own' | 'borrowed'; sheets: number; student_id: number }
+interface WasteEventItem { id: number; type: 'error' | 'blank'; sheets: number; operator_login: string; created_at: string; }
+interface RecentEntry { id: number; type: 'own' | 'borrowed'; sheets: number; user_id: number; user_type: string; user_name?: string; user_identifier?: string; student_id?: number }
 interface RecentOperation {
   id: number;
-  student_name: string;
-  registration_number: string;
-  student_id: number;
-  student_course: string;
-  student_period: string;
+  user_name: string;
+  user_identifier: string;
+  user_id: number;
+  user_type: string;
+  user_detail?: string;
   total_sheets: number;
   identify_method: 'manual' | 'rfid' | 'facial';
   created_at: string;
   entries: RecentEntry[];
+  // legacy
+  student_name?: string;
+  registration_number?: string;
+  student_id?: number;
+  student_course?: string;
+  student_period?: string;
 }
 
 interface PrimaryEntry {
-  id: number; student_id: number; sheets: number; type: 'own' | 'borrowed';
-  student_name: string; registration_number: string; course?: string; period?: string;
+  id: number; user_id: number; user_type: string; sheets: number; type: 'own' | 'borrowed';
+  user_name: string; user_identifier: string; detail?: string;
+  // legacy
+  student_id?: number; student_name?: string; registration_number?: string; course?: string; period?: string;
 }
 interface PrimaryOperation {
   id: number; total_sheets: number; status: string; created_at: string;
@@ -56,8 +67,10 @@ interface PrimaryOperation {
 }
 interface LoanEntry {
   id: number; sheets: number; created_at: string; operation_id: number;
-  operation_total: number; primary_student_id: number; primary_student_name: string;
-  primary_registration: string; operator_login: string;
+  operation_total: number; primary_user_id: number; primary_user_type: string;
+  primary_user_name: string; primary_user_identifier: string; operator_login: string;
+  // legacy
+  primary_student_id?: number; primary_student_name?: string; primary_registration?: string;
 }
 interface FullHistory { as_primary: PrimaryOperation[]; as_lender: LoanEntry[] }
 
@@ -82,10 +95,16 @@ function onlyNumbers(value: string): string {
   return value.replace(/\D/g, '');
 }
 
-function getNotInLyceumReg(err: unknown): string | null {
-  const data = (err as { response?: { data?: { error?: string; registration_number?: string } } })?.response?.data;
+function getNotInSystemDoc(err: unknown): string | null {
+  const data = (err as { response?: { data?: { error?: string; registration_number?: string; employee_code?: string } } })?.response?.data;
   if (data?.error === 'STUDENT_NOT_IN_LYCEUM') return data.registration_number ?? '';
+  if (data?.error === 'EMPLOYEE_NOT_IN_NASAJON') return data.employee_code ?? '';
   return null;
+}
+
+// kept for backward compat in existing call sites
+function getNotInLyceumReg(err: unknown): string | null {
+  return getNotInSystemDoc(err);
 }
 
 function extractFaceErrData(err: unknown): FaceErrData | null {
@@ -161,7 +180,7 @@ export function PrintFlowPage() {
   const [notInLyceumModal, setNotInLyceumModal] = useState<{ registration_number: string; confirm: () => void } | null>(null);
 
   // Student detail modal (triggered from recent ops list)
-  const [selectedRecent, setSelectedRecent] = useState<{ id: number; registration_number: string; name: string } | null>(null);
+  const [selectedRecent, setSelectedRecent] = useState<{ id: number; registration_number: string; name: string; user_type?: string } | null>(null);
   const [recentDetailLoading, setRecentDetailLoading] = useState(false);
   const [recentStudentDetail, setRecentStudentDetail] = useState<IdentifyResult | null>(null);
   const [recentFullHistory, setRecentFullHistory] = useState<FullHistory | null>(null);
@@ -177,6 +196,13 @@ export function PrintFlowPage() {
   const [loanLoading, setLoanLoading] = useState(false);
   const [loanError, setLoanError] = useState('');
   const [loanAddedMsg, setLoanAddedMsg] = useState('');
+
+  // Waste registration (print errors & blank pages)
+  const [wasteModal, setWasteModal] = useState<'error' | 'blank' | null>(null);
+  const [todayWaste, setTodayWaste] = useState<{ error_sheets: number; blank_sheets: number; events: WasteEventItem[] }>({ error_sheets: 0, blank_sheets: 0, events: [] });
+  const [wasteSheets, setWasteSheets] = useState('');
+  const [wasteLoading, setWasteLoading] = useState(false);
+  const [wasteError, setWasteError] = useState('');
 
   // Camera state
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -216,8 +242,12 @@ export function PrintFlowPage() {
   const loadRecentOps = useCallback(async () => {
     setRecentLoading(true);
     try {
-      const res = await api.get<{ operations: RecentOperation[] }>('/print/operations/recent?limit=10');
-      setRecentOps(res.data.operations);
+      const [opsRes, wasteRes] = await Promise.all([
+        api.get<{ operations: RecentOperation[] }>('/print/operations/recent?limit=10'),
+        api.get<{ error_sheets: number; blank_sheets: number; events: WasteEventItem[] }>('/waste/today'),
+      ]);
+      setRecentOps(opsRes.data.operations);
+      setTodayWaste(wasteRes.data);
     } catch {
       // silently fail — list is non-critical
     } finally {
@@ -483,19 +513,23 @@ export function PrintFlowPage() {
   const loanLiveHandler = async () => {
     const image = captureFrame();
     if (!image) return;
+    const primaryId = identifyResult?.user.id;
+    const primaryType = identifyResult?.user_type;
     try {
-      const res = await api.post<IdentifyResult>('/students/identify/facial', { image }, { params: { context: 'loan', primary_student_id: identifyResult?.student.id } });
+      const res = await api.post<IdentifyResult>('/students/identify/facial', { image }, {
+        params: { context: 'loan', primary_student_id: primaryType === 'student' ? primaryId : undefined },
+      });
       setFaceBox(res.data.box ?? null);
       stopLiveLoop();
       validateAndAddLoanStudent(res.data, 'facial');
     } catch (err) {
       const data = extractFaceErrData(err);
       setFaceBox(data?.box ?? null);
-      if (data?.error === 'STUDENT_NOT_IN_LYCEUM') {
+      if (data?.error === 'STUDENT_NOT_IN_LYCEUM' || data?.error === 'EMPLOYEE_NOT_IN_NASAJON') {
         stopLiveLoop();
-        const reg = data.registration_number ?? '';
+        const doc = data.registration_number ?? data.employee_code ?? '';
         setNotInLyceumModal({
-          registration_number: reg,
+          registration_number: doc,
           confirm: async () => {
             const forceImage = captureFrame();
             if (!forceImage) return;
@@ -504,7 +538,7 @@ export function PrintFlowPage() {
               const r = await api.post<IdentifyResult>(
                 '/students/identify/facial',
                 { image: forceImage },
-                { params: { force: 'true', context: 'loan', primary_student_id: identifyResult?.student.id } },
+                { params: { force: 'true', context: 'loan', primary_student_id: primaryType === 'student' ? primaryId : undefined } },
               );
               validateAndAddLoanStudent(r.data, 'facial');
             } catch (e) {
@@ -515,7 +549,6 @@ export function PrintFlowPage() {
           },
         });
       }
-      // FACE_NOT_RECOGNIZED: loop continues automatically
     }
   };
 
@@ -527,22 +560,33 @@ export function PrintFlowPage() {
   // ── Other identification methods ──────────────────────────────────────────
 
   const identifyByManual = async (force = false) => {
-    if (!registration.trim()) return;
+    const doc = registration.trim();
+    if (!doc) return;
     setIdentifying(true);
     setIdentifyError('');
     try {
-      const res = await api.post<IdentifyResult>(
-        '/students/identify/manual',
-        { registration_number: registration.trim() },
-        force ? { params: { force: 'true' } } : undefined,
-      );
+      const userType = detectUserType(doc);
+      let res;
+      if (userType === 'student') {
+        res = await api.post<IdentifyResult>(
+          '/students/identify/manual',
+          { registration_number: doc },
+          force ? { params: { force: 'true' } } : undefined,
+        );
+      } else {
+        res = await api.post<IdentifyResult>(
+          '/employees/identify/manual',
+          { employee_code: doc },
+          force ? { params: { force: 'true' } } : undefined,
+        );
+      }
       setIdentifyResult(res.data);
       setIdentifyMethodUsed('manual');
       setStep('sheets');
     } catch (err) {
-      const reg = getNotInLyceumReg(err);
-      if (reg !== null) {
-        setNotInLyceumModal({ registration_number: reg, confirm: () => identifyByManual(true) });
+      const notInSystem = getNotInSystemDoc(err);
+      if (notInSystem !== null) {
+        setNotInLyceumModal({ registration_number: notInSystem, confirm: () => identifyByManual(true) });
         return;
       }
       setIdentifyError(extractApiError(err));
@@ -583,11 +627,15 @@ export function PrintFlowPage() {
     setPreviewLoading(true);
     setStackError('');
     try {
-      const extraIds = loanStudents.map((l) => l.identify_result.student.id);
+      const extraUsers = loanStudents.map((l) => ({
+        user_id: l.identify_result.user.id,
+        user_type: l.identify_result.user_type,
+      }));
       const res = await api.post<{ debits: StackedDebit[] }>('/print/preview-stack', {
-        primary_student_id: identifyResult.student.id,
+        primary_user_id: identifyResult.user.id,
+        primary_user_type: identifyResult.user_type,
         total_sheets: n,
-        extra_student_ids: extraIds,
+        extra_users: extraUsers,
       });
       setDebits(res.data.debits);
       setStep('confirm');
@@ -616,12 +664,16 @@ export function PrintFlowPage() {
   };
 
   const validateAndAddLoanStudent = (result: IdentifyResult, method: IdentifyMethod): boolean => {
-    if (result.student.id === identifyResult?.student.id) {
+    const isSamePrimary = result.user.id === identifyResult?.user.id && result.user_type === identifyResult?.user_type;
+    if (isSamePrimary) {
       setErrorModal('O emprestador não pode ser o próprio solicitante da impressão.');
       return false;
     }
-    if (loanStudents.some((l) => l.identify_result.student.id === result.student.id)) {
-      setErrorModal('Esta matrícula já foi adicionada como emprestadora.');
+    const isDuplicate = loanStudents.some(
+      (l) => l.identify_result.user.id === result.user.id && l.identify_result.user_type === result.user_type
+    );
+    if (isDuplicate) {
+      setErrorModal('Este usuário já foi adicionado como emprestador.');
       return false;
     }
 
@@ -639,7 +691,7 @@ export function PrintFlowPage() {
       setLoanError('');
       stopCamera();
       setLoanAddedMsg(
-        `${result.student.name} adicionado (+${result.available_balance} folha${result.available_balance !== 1 ? 's' : ''}). Ainda faltam ${remaining} folha${remaining !== 1 ? 's' : ''}.`
+        `${result.user.name} adicionado (+${result.available_balance} folha${result.available_balance !== 1 ? 's' : ''}). Ainda faltam ${remaining} folha${remaining !== 1 ? 's' : ''}.`
       );
       return true;
     }
@@ -649,19 +701,32 @@ export function PrintFlowPage() {
   };
 
   const addLoanByManual = async (force = false) => {
-    if (!loanRegistration.trim()) return;
+    const doc = loanRegistration.trim();
+    if (!doc) return;
     setLoanLoading(true);
     try {
-      const res = await api.post<IdentifyResult>(
-        '/students/identify/manual',
-        { registration_number: loanRegistration.trim() },
-        { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_student_id: identifyResult?.student.id } },
-      );
+      const userType = detectUserType(doc);
+      const primaryId = identifyResult?.user.id;
+      const primaryType = identifyResult?.user_type;
+      let res;
+      if (userType === 'student') {
+        res = await api.post<IdentifyResult>(
+          '/students/identify/manual',
+          { registration_number: doc },
+          { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_student_id: primaryType === 'student' ? primaryId : undefined } },
+        );
+      } else {
+        res = await api.post<IdentifyResult>(
+          '/employees/identify/manual',
+          { employee_code: doc },
+          { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_user_id: primaryId, primary_user_type: primaryType } },
+        );
+      }
       validateAndAddLoanStudent(res.data, 'manual');
     } catch (err) {
-      const reg = getNotInLyceumReg(err);
-      if (reg !== null) {
-        setNotInLyceumModal({ registration_number: reg, confirm: () => addLoanByManual(true) });
+      const doc2 = getNotInSystemDoc(err);
+      if (doc2 !== null) {
+        setNotInLyceumModal({ registration_number: doc2, confirm: () => addLoanByManual(true) });
         return;
       }
       setErrorModal(extractApiError(err));
@@ -674,16 +739,18 @@ export function PrintFlowPage() {
     if (!loanCardHex.trim()) return;
     setLoanLoading(true);
     try {
+      const primaryId = identifyResult?.user.id;
+      const primaryType = identifyResult?.user_type;
       const res = await api.post<IdentifyResult>(
         '/students/identify/rfid',
         { card_hex: loanCardHex.trim() },
-        { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_student_id: identifyResult?.student.id } },
+        { params: { ...(force ? { force: 'true' } : {}), context: 'loan', primary_student_id: primaryType === 'student' ? primaryId : undefined } },
       );
       validateAndAddLoanStudent(res.data, 'rfid');
     } catch (err) {
-      const reg = getNotInLyceumReg(err);
-      if (reg !== null) {
-        setNotInLyceumModal({ registration_number: reg, confirm: () => addLoanByRFID(true) });
+      const doc = getNotInSystemDoc(err);
+      if (doc !== null) {
+        setNotInLyceumModal({ registration_number: doc, confirm: () => addLoanByRFID(true) });
         return;
       }
       setErrorModal(extractApiError(err));
@@ -698,14 +765,16 @@ export function PrintFlowPage() {
     setConfirmLoading(true);
     try {
       const enrichedDebits = debits.map((d) => {
-        if (d.student_id === identifyResult.student.id) {
-          return { ...d, identify_method: identifyMethodUsed };
-        }
-        const loan = loanStudents.find((l) => l.identify_result.student.id === d.student_id);
+        const isPrimary = d.user_id === identifyResult.user.id && d.user_type === identifyResult.user_type;
+        if (isPrimary) return { ...d, identify_method: identifyMethodUsed };
+        const loan = loanStudents.find(
+          (l) => l.identify_result.user.id === d.user_id && l.identify_result.user_type === d.user_type
+        );
         return { ...d, identify_method: loan?.identify_method ?? 'manual' };
       });
       const res = await api.post<{ operation_id: number }>('/print/register', {
-        primary_student_id: identifyResult.student.id,
+        primary_user_id: identifyResult.user.id,
+        primary_user_type: identifyResult.user_type,
         total_sheets: parseInt(sheets),
         stacked_debits: enrichedDebits,
         identify_method: identifyMethodUsed,
@@ -741,17 +810,25 @@ export function PrintFlowPage() {
   };
 
   const openRecentDetail = async (op: RecentOperation) => {
-    setSelectedRecent({ id: op.student_id, registration_number: op.registration_number, name: op.student_name });
+    const userId = op.user_id ?? op.student_id ?? 0;
+    const userType = op.user_type || 'student';
+    const identifier = op.user_identifier ?? op.registration_number ?? '';
+    const name = op.user_name ?? op.student_name ?? '';
+    setSelectedRecent({ id: userId, registration_number: identifier, name, user_type: userType });
     setRecentDetailLoading(true);
     setRecentStudentDetail(null);
     setRecentFullHistory(null);
     setRecentModalOpsPage(1);
     const todayDate = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
     try {
-      const [detailRes, histRes] = await Promise.all([
-        api.post<IdentifyResult>('/students/identify/manual', { registration_number: op.registration_number }),
-        api.get<FullHistory>(`/students/${op.student_id}/full-history`, { params: { date: todayDate } }),
-      ]);
+      let detailRes;
+      if (userType === 'employee') {
+        detailRes = await api.post<IdentifyResult>('/employees/identify/manual', { employee_code: identifier });
+      } else {
+        detailRes = await api.post<IdentifyResult>('/students/identify/manual', { registration_number: identifier });
+      }
+      const histEndpoint = userType === 'employee' ? `/employees/${userId}/full-history` : `/students/${userId}/full-history`;
+      const histRes = await api.get<FullHistory>(histEndpoint, { params: { date: todayDate } });
       setRecentStudentDetail(detailRes.data);
       setRecentFullHistory(histRes.data);
     } finally {
@@ -786,7 +863,7 @@ export function PrintFlowPage() {
       {/* ── Step: Identify ── */}
       {step === 'identify' && (
         <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-6 animate-slideUp">
-          <h2 className="text-[16px] font-semibold text-gray-900 mb-5">Identificar Aluno</h2>
+          <h2 className="text-[16px] font-semibold text-gray-900 mb-5">Identificar Usuário</h2>
 
           {/* Method tabs */}
           <div className="flex gap-1 p-1 bg-gray-100/80 rounded-xl mb-5">
@@ -813,16 +890,28 @@ export function PrintFlowPage() {
           {/* Manual */}
           {identifyMethod === 'manual' && (
             <div className="space-y-3">
-              <Input
-                ref={registrationInputRef}
-                label="Matrícula"
-                value={registration}
-                onChange={(e) => setRegistration(onlyNumbers(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && identifyByManual()}
-                placeholder="Somente números"
-                inputMode="numeric"
-                pattern="[0-9]*"
-              />
+              {(() => {
+                const detectedType = registration.length > 0 ? detectUserType(registration) : null;
+                return (
+                  <div className="relative">
+                    <Input
+                      ref={registrationInputRef}
+                      label={detectedType === 'employee' ? 'Código / CPF (Funcionário)' : 'Matrícula'}
+                      value={registration}
+                      onChange={(e) => setRegistration(onlyNumbers(e.target.value))}
+                      onKeyDown={(e) => e.key === 'Enter' && identifyByManual()}
+                      placeholder="Somente números"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                    />
+                    {detectedType === 'employee' && (
+                      <span className="absolute right-3 top-8 flex items-center gap-1 text-[11px] text-blue-500 font-medium pointer-events-none">
+                        <Briefcase size={11} /> Funcionário
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
               <Button onClick={() => identifyByManual()} loading={identifying} className="w-full justify-center">
                 Identificar <ChevronRight size={15} />
               </Button>
@@ -902,6 +991,26 @@ export function PrintFlowPage() {
         </div>
       )}
 
+      {/* ── Special print actions (identify step only) ── */}
+      {step === 'identify' && (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => { setWasteSheets(''); setWasteError(''); setWasteModal('error'); }}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass-sm text-[13px] font-medium text-red-600 hover:bg-red-50/70 transition-colors"
+          >
+            <AlertTriangle size={14} />
+            Erro de impressão
+          </button>
+          <button
+            onClick={() => { setWasteSheets(''); setWasteError(''); setWasteModal('blank'); }}
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass-sm text-[13px] font-medium text-gray-600 hover:bg-gray-50/70 transition-colors"
+          >
+            <FileX size={14} />
+            Folhas em branco
+          </button>
+        </div>
+      )}
+
       {/* ── Recent operations list (identify step only) ── */}
       {step === 'identify' && (
         <div className="space-y-2">
@@ -909,7 +1018,7 @@ export function PrintFlowPage() {
 
           {recentLoading ? (
             <div className="flex justify-center py-6"><Spinner size="sm" /></div>
-          ) : recentOps.length === 0 ? (
+          ) : recentOps.length === 0 && todayWaste.events.length === 0 ? (
             <p className="text-center text-[13px] text-gray-400 py-4">Nenhuma operação registrada ainda.</p>
           ) : (
             <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass divide-y divide-gray-100/60 overflow-hidden">
@@ -932,13 +1041,16 @@ export function PrintFlowPage() {
                         className="text-left group"
                       >
                         <p className="text-[13px] font-semibold text-gray-900 truncate leading-tight group-hover:text-blue-600 transition-colors">
-                          {shortName(op.student_name)}
+                          {shortName(op.user_name ?? op.student_name ?? '')}
                         </p>
                       </button>
                       <p className="text-[11px] text-gray-400 truncate leading-snug mt-0.5">
-                        {op.registration_number}
-                        {op.student_course ? ` · ${op.student_course}` : ''}
-                        {op.student_period ? ` · ${op.student_period}` : ''}
+                        {op.user_identifier ?? op.registration_number ?? ''}
+                        {op.user_detail ? ` · ${op.user_detail}` : (op.student_course ? ` · ${op.student_course}` : '')}
+                        {!op.user_detail && op.student_period ? ` · ${op.student_period}` : ''}
+                        {op.user_type === 'employee' && (
+                          <span className="ml-1 text-blue-400">· Func.</span>
+                        )}
                       </p>
                     </div>
 
@@ -955,6 +1067,32 @@ export function PrintFlowPage() {
                   </div>
                 );
               })}
+
+              {/* Waste events */}
+              {todayWaste.events.length > 0 && (
+                <>
+                  <div className={`px-4 py-2 bg-gray-50/40 ${recentOps.length > 0 ? 'border-t border-gray-100/60' : ''}`}>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Desperdício</p>
+                  </div>
+                  {todayWaste.events.map((e) => (
+                    <div key={`waste-${e.id}`} className="flex items-center gap-3 px-4 py-2.5">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${e.type === 'error' ? 'bg-red-50 text-red-400' : 'bg-gray-100 text-gray-400'}`}>
+                        {e.type === 'error' ? <AlertTriangle size={13} /> : <FileX size={13} />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-semibold text-gray-700">
+                          {e.type === 'error' ? 'Erro de impressão' : 'Folhas em branco'}
+                        </p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">{e.operator_login}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-0.5 shrink-0">
+                        <span className="text-[13px] font-bold text-gray-500">{e.sheets}</span>
+                        <span className="text-[10px] text-gray-300">{new Date(e.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -991,7 +1129,7 @@ export function PrintFlowPage() {
               <div className="mt-4 space-y-2">
                 <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide">Emprestadores</p>
                 {loanStudents.map((l, i) => (
-                  <div key={l.identify_result.student.id} className="flex items-center gap-2">
+                  <div key={`${l.identify_result.user_type}-${l.identify_result.user.id}`} className="flex items-center gap-2">
                     <div className="flex-1">
                       <StudentCard result={l.identify_result} compact />
                     </div>
@@ -1056,8 +1194,8 @@ export function PrintFlowPage() {
 
             <div className="space-y-3 mb-5">
               <div className="flex justify-between text-[14px]">
-                <span className="text-gray-500">Aluno</span>
-                <span className="font-medium text-gray-900">{identifyResult.student.name}</span>
+                <span className="text-gray-500">{identifyResult.user_type === 'employee' ? 'Funcionário' : 'Aluno'}</span>
+                <span className="font-medium text-gray-900">{identifyResult.user.name}</span>
               </div>
               <div className="flex justify-between text-[14px]">
                 <span className="text-gray-500">Total de folhas</span>
@@ -1067,8 +1205,8 @@ export function PrintFlowPage() {
                 <div className="pt-2 border-t border-gray-100">
                   <p className="text-[12px] text-gray-500 mb-2">Distribuição:</p>
                   {debits.map((d) => (
-                    <div key={d.student_id} className="flex justify-between text-[13px] py-1">
-                      <span className="text-gray-600">{d.name} ({d.registration_number})</span>
+                    <div key={`${d.user_type}:${d.user_id}`} className="flex justify-between text-[13px] py-1">
+                      <span className="text-gray-600">{d.name} ({d.identifier}){d.user_type === 'employee' ? ' · Func.' : ''}</span>
                       <span className="font-medium">{d.sheets_to_debit} folhas</span>
                     </div>
                   ))}
@@ -1254,11 +1392,67 @@ export function PrintFlowPage() {
         </Button>
       </Modal>
 
-      {/* ── Recent operation student detail modal ── */}
+      {/* ── Waste registration modal ── */}
+      <Modal
+        open={!!wasteModal}
+        onClose={() => setWasteModal(null)}
+        title={wasteModal === 'error' ? 'Registrar Erro de Impressão' : 'Registrar Folhas em Branco'}
+        size="sm"
+      >
+        <p className="text-[13px] text-gray-500 mb-4">
+          {wasteModal === 'error'
+            ? 'Registre folhas perdidas por falha, atolamento ou descarte durante a impressão. Essas folhas não são debitadas de nenhuma cota.'
+            : 'Registre folhas em branco que não foram utilizadas para impressão de nenhum conteúdo.'}
+        </p>
+        <Input
+          label="Número de folhas"
+          type="number"
+          min="1"
+          step="1"
+          value={wasteSheets}
+          onChange={(e) => setWasteSheets(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={async (e) => {
+            if (e.key === 'Enter') {
+              const n = parseInt(wasteSheets);
+              if (!n || n < 1) { setWasteError('Informe um número válido.'); return; }
+              setWasteLoading(true); setWasteError('');
+              try {
+                await api.post('/waste', { type: wasteModal, sheets: n });
+                setWasteModal(null);
+              } catch { setWasteError('Não foi possível registrar. Tente novamente.'); }
+              finally { setWasteLoading(false); }
+            }
+          }}
+          autoFocus
+        />
+        {wasteError && <p className="text-[13px] text-red-500 mt-2">{wasteError}</p>}
+        <div className="flex gap-2 mt-4">
+          <Button variant="secondary" size="sm" onClick={() => setWasteModal(null)}>Cancelar</Button>
+          <Button
+            size="sm"
+            className="flex-1 justify-center"
+            loading={wasteLoading}
+            onClick={async () => {
+              const n = parseInt(wasteSheets);
+              if (!n || n < 1) { setWasteError('Informe um número válido.'); return; }
+              setWasteLoading(true); setWasteError('');
+              try {
+                await api.post('/waste', { type: wasteModal, sheets: n });
+                setWasteModal(null);
+              } catch { setWasteError('Não foi possível registrar. Tente novamente.'); }
+              finally { setWasteLoading(false); }
+            }}
+          >
+            Registrar
+          </Button>
+        </div>
+      </Modal>
+
+      {/* ── Recent operation detail modal ── */}
       <Modal
         open={!!selectedRecent}
         onClose={() => setSelectedRecent(null)}
-        title="Detalhes do Aluno"
+        title={selectedRecent?.user_type === 'employee' ? 'Detalhes do Funcionário' : 'Detalhes do Aluno'}
         size="xl"
       >
         {recentDetailLoading ? (
@@ -1271,27 +1465,34 @@ export function PrintFlowPage() {
                 {recentStudentDetail.photo ? (
                   <img
                     src={`data:image/jpeg;base64,${recentStudentDetail.photo}`}
-                    alt={recentStudentDetail.student.name}
+                    alt={recentStudentDetail.user.name}
                     className="w-16 h-16 rounded-xl object-cover border border-white/60 shadow-sm"
                   />
+                ) : recentStudentDetail.user_type === 'employee' ? (
+                  <div className="w-16 h-16 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-400">
+                    <Briefcase size={24} />
+                  </div>
                 ) : (
                   <div className="w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-xl font-semibold">
-                    {recentStudentDetail.student.name.charAt(0).toUpperCase()}
+                    {recentStudentDetail.user.name.charAt(0).toUpperCase()}
                   </div>
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-gray-900">{recentStudentDetail.student.name}</p>
-                <p className="text-[12px] text-gray-500 mt-0.5">{recentStudentDetail.student.registration_number}</p>
-                {recentStudentDetail.student.course && (
-                  <p className="text-[12px] text-gray-500">
-                    {recentStudentDetail.student.course}
-                    {recentStudentDetail.student.period && ` · ${recentStudentDetail.student.period}`}
-                  </p>
-                )}
-                {recentStudentDetail.student.sync_status !== 'synced' && (
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[15px] font-semibold text-gray-900">{recentStudentDetail.user.name}</p>
+                  {recentStudentDetail.user_type === 'employee' && (
+                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">Funcionário</span>
+                  )}
+                </div>
+                <p className="text-[12px] text-gray-500 mt-0.5">{getUserIdentifier(recentStudentDetail.user, recentStudentDetail.user_type)}</p>
+                {(() => {
+                  const detail = getUserDetail(recentStudentDetail.user, recentStudentDetail.user_type);
+                  return detail ? <p className="text-[12px] text-gray-500">{detail}</p> : null;
+                })()}
+                {recentStudentDetail.user.sync_status !== 'synced' && (
                   <span className="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                    {SYNC_STATUS_LABELS[recentStudentDetail.student.sync_status]}
+                    {SYNC_STATUS_LABELS[recentStudentDetail.user.sync_status]}
                   </span>
                 )}
               </div>
@@ -1337,15 +1538,15 @@ export function PrintFlowPage() {
                           <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
                         </div>
                         {op.entries.map((e) => {
-                          const parts = e.student_name.trim().split(/\s+/);
-                          const displayName = parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
+                          const isOwn = e.user_id === selectedRecent?.id && e.user_type === selectedRecent?.user_type;
+                          const displayName = shortName(e.user_name ?? e.student_name ?? '');
                           return (
                             <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
                               <div className="flex items-center gap-2">
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${e.student_id === selectedRecent?.id ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
-                                  {e.student_id === selectedRecent?.id ? 'Própria' : 'Empréstimo'}
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${isOwn ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                  {isOwn ? 'Própria' : 'Empréstimo'}
                                 </span>
-                                {e.student_id !== selectedRecent?.id && (
+                                {!isOwn && (
                                   <p className="text-[12px] font-medium text-gray-800 leading-tight">{displayName}</p>
                                 )}
                               </div>
@@ -1380,13 +1581,13 @@ export function PrintFlowPage() {
             {/* Loans given */}
             {recentFullHistory.as_lender.length > 0 && (
               <div>
-                <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Cota cedida a outros alunos</p>
+                <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Cota cedida a outros usuários</p>
                 <div className="rounded-xl border border-gray-100 overflow-hidden divide-y divide-gray-100">
                   {recentFullHistory.as_lender.map((e) => (
                     <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
                       <div>
-                        <p className="text-[13px] font-medium text-gray-900">{e.primary_student_name}</p>
-                        <p className="text-[11px] text-gray-400">{e.primary_registration} · op. #{e.operation_id}</p>
+                        <p className="text-[13px] font-medium text-gray-900">{e.primary_user_name ?? e.primary_student_name}</p>
+                        <p className="text-[11px] text-gray-400">{e.primary_user_identifier ?? e.primary_registration} · op. #{e.operation_id}</p>
                       </div>
                       <span className="text-[13px] font-bold text-emerald-700">{e.sheets} folhas</span>
                     </div>

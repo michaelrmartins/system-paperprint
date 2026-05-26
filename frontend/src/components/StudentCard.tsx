@@ -1,5 +1,5 @@
-import { IdentifyResult } from '../types';
-import { AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { IdentifyResult, getUserIdentifier, getUserDetail } from '../types';
+import { AlertCircle, CheckCircle2, Clock, Briefcase } from 'lucide-react';
 import { SYNC_STATUS_LABELS } from '../lib/format';
 
 interface StudentCardProps {
@@ -8,7 +8,10 @@ interface StudentCardProps {
 }
 
 export function StudentCard({ result, compact = false }: StudentCardProps) {
-  const { student, photo, available_balance, daily_consumed } = result;
+  const { user, user_type, photo, available_balance, daily_consumed } = result;
+
+  const identifier = getUserIdentifier(user, user_type);
+  const detail = getUserDetail(user, user_type);
 
   const balanceColor =
     available_balance === 0
@@ -17,18 +20,27 @@ export function StudentCard({ result, compact = false }: StudentCardProps) {
       ? 'text-amber-600'
       : 'text-emerald-600';
 
+  const isEmployee = user_type === 'employee';
+
   return (
     <div className={`flex gap-4 ${compact ? '' : 'p-4 bg-white/60 backdrop-blur-sm border border-white/60 rounded-2xl shadow-glass-sm animate-fadeIn'}`}>
       <div className="shrink-0">
         {photo ? (
           <img
             src={`data:image/jpeg;base64,${photo}`}
-            alt={student.name}
+            alt={user.name}
             className="w-16 h-16 rounded-xl object-cover border border-white/60 shadow-sm"
           />
         ) : (
-          <div className="w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-xl font-semibold">
-            {student.name.charAt(0).toUpperCase()}
+          <div className={`w-16 h-16 rounded-xl border flex items-center justify-center text-xl font-semibold ${
+            isEmployee
+              ? 'bg-blue-50 border-blue-100 text-blue-400'
+              : 'bg-gray-100 border-gray-200 text-gray-400'
+          }`}>
+            {isEmployee
+              ? <Briefcase size={24} />
+              : user.name.charAt(0).toUpperCase()
+            }
           </div>
         )}
       </div>
@@ -36,25 +48,29 @@ export function StudentCard({ result, compact = false }: StudentCardProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-[15px] font-semibold text-gray-900 leading-tight truncate">{student.name}</p>
-            <p className="text-[12px] text-gray-500 mt-0.5">{student.registration_number}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-[15px] font-semibold text-gray-900 leading-tight truncate">{user.name}</p>
+              {isEmployee && (
+                <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                  Funcionário
+                </span>
+              )}
+            </div>
+            <p className="text-[12px] text-gray-500 mt-0.5">{identifier}</p>
           </div>
-          {student.sync_status !== 'synced' && (
+          {user.sync_status !== 'synced' && (
             <span className="shrink-0 flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
               <AlertCircle size={11} />
-              {SYNC_STATUS_LABELS[student.sync_status]}
+              {SYNC_STATUS_LABELS[user.sync_status]}
             </span>
           )}
         </div>
 
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          {student.course && (
-            <span className="text-[12px] text-gray-600">{student.course}</span>
-          )}
-          {student.period && (
-            <span className="text-[12px] text-gray-500">{student.period}</span>
-          )}
-        </div>
+        {detail && (
+          <div className="mt-1.5">
+            <span className="text-[12px] text-gray-600">{detail}</span>
+          </div>
+        )}
 
         <div className="mt-3 flex items-center gap-4">
           <div className="flex items-center gap-1.5">

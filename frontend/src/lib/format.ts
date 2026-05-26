@@ -40,8 +40,16 @@ export const SYNC_STATUS_LABELS: Record<string, string> = {
 };
 
 export const SETTING_LABELS: Record<string, string> = {
-  daily_quota: 'Cota diária (folhas)',
+  daily_quota: 'Cota diária — Alunos (folhas)',
+  employee_daily_quota: 'Cota diária — Funcionários (folhas)',
   max_stacked_registrations: 'Máx. matrículas empilhadas',
   duplex_counts_double: 'Duplex conta como 2 folhas',
   quota_reset_time: 'Horário de reset da cota',
+  allow_cross_type_stacking: 'Permitir empilhamento aluno ↔ funcionário',
+  allow_employee_employee_stacking: 'Permitir funcionário emprestar de outro funcionário',
+};
+
+export const USER_TYPE_LABELS: Record<string, string> = {
+  student: 'Aluno',
+  employee: 'Funcionário',
 };

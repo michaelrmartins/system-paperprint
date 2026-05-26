@@ -1,4 +1,9 @@
 const ERROR_MESSAGES: Record<string, string> = {
+  MISSING_EMPLOYEE_CODE: 'Informe o código do funcionário.',
+  EMPLOYEE_NOT_FOUND: 'Funcionário não encontrado.',
+  EMPLOYEE_TERMINATED: 'Funcionário desligado. Operação não autorizada.',
+  EMPLOYEE_NOT_IN_NASAJON: 'Funcionário não encontrado no sistema RH (Nasajon).',
+  NASAJON_UNAVAILABLE: 'Sistema de RH (Nasajon) indisponível. Tente novamente em instantes.',
   MISSING_CREDENTIALS: 'Usuário e senha são obrigatórios.',
   INVALID_CREDENTIALS: 'Usuário ou senha incorretos.',
   UNAUTHORIZED: 'Sessão expirada. Faça login novamente.',

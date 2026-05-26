@@ -104,6 +104,73 @@ async function migrate() {
     });
   }
 
+  // print_waste table — error prints and blank pages
+  await createTableIfMissing('print_waste', (t) => {
+    t.increments('id').primary();
+    t.enu('type', ['error', 'blank']).notNullable();
+    t.integer('sheets').notNullable();
+    t.integer('operator_id').notNullable().references('id').inTable('system_users');
+    t.timestamp('created_at', { useTz: true }).defaultTo(db.fn.now());
+  });
+
+  // employees table
+  await createTableIfMissing('employees', (t) => {
+    t.increments('id').primary();
+    t.string('employee_code', 50).notNullable().unique();
+    t.string('name', 255).notNullable();
+    t.string('department', 255).notNullable().defaultTo('');
+    t.string('email', 255).nullable();
+    t.enu('sync_status', ['synced', 'pending', 'attention']).notNullable().defaultTo('synced');
+    t.timestamp('created_at', { useTz: true }).defaultTo(db.fn.now());
+    t.timestamp('updated_at', { useTz: true }).defaultTo(db.fn.now());
+  });
+
+  // add user_type + user_id to print_operations
+  const hasPrintUserType = await db.schema.hasColumn('print_operations', 'user_type');
+  if (!hasPrintUserType) {
+    await db.schema.table('print_operations', (t) => {
+      t.string('user_type', 20).nullable();
+      t.integer('user_id').nullable();
+    });
+    await db.raw(`UPDATE print_operations SET user_type = 'student', user_id = student_id`);
+    await db.schema.table('print_operations', (t) => {
+      t.string('user_type', 20).notNullable().defaultTo('student').alter();
+      t.integer('user_id').notNullable().alter();
+    });
+  }
+  // student_id must be nullable now that employees don't have one (idempotent in PG)
+  await db.raw('ALTER TABLE print_operations ALTER COLUMN student_id DROP NOT NULL');
+
+  // add user_type + user_id to entries
+  const hasEntryUserType = await db.schema.hasColumn('entries', 'user_type');
+  if (!hasEntryUserType) {
+    await db.schema.table('entries', (t) => {
+      t.string('user_type', 20).nullable();
+      t.integer('user_id').nullable();
+    });
+    await db.raw(`UPDATE entries SET user_type = 'student', user_id = student_id`);
+    await db.schema.table('entries', (t) => {
+      t.string('user_type', 20).notNullable().defaultTo('student').alter();
+      t.integer('user_id').notNullable().alter();
+    });
+  }
+  // student_id must be nullable now that employees don't have one (idempotent in PG)
+  await db.raw('ALTER TABLE entries ALTER COLUMN student_id DROP NOT NULL');
+
+  // add primary_user_type + primary_user_id to invalid_document_attempts
+  const hasInvalidDocUserType = await db.schema.hasColumn('invalid_document_attempts', 'primary_user_type');
+  if (!hasInvalidDocUserType) {
+    await db.schema.table('invalid_document_attempts', (t) => {
+      t.string('primary_user_type', 20).nullable();
+      t.integer('primary_user_id').nullable();
+    });
+    await db.raw(`
+      UPDATE invalid_document_attempts
+      SET primary_user_type = 'student', primary_user_id = primary_student_id
+      WHERE primary_student_id IS NOT NULL
+    `);
+  }
+
   logger.info('Migrations completed');
 }
 
@@ -131,6 +198,17 @@ async function seed() {
     { key: 'zabbix_item_status', value: '', description: 'Item ID: status da impressora (1=online, 0=offline)' },
   ];
   for (const entry of zabbixDefaults) {
+    const has = await db('settings').where('key', entry.key).first();
+    if (!has) await db('settings').insert(entry);
+  }
+
+  // Employee and stacking settings
+  const employeeSettings = [
+    { key: 'employee_daily_quota', value: '10', description: 'Cota diária de folhas por funcionário' },
+    { key: 'allow_cross_type_stacking', value: 'false', description: 'Permite empilhamento entre alunos e funcionários' },
+    { key: 'allow_employee_employee_stacking', value: 'false', description: 'Permite funcionário emprestar cota de outro funcionário' },
+  ];
+  for (const entry of employeeSettings) {
     const has = await db('settings').where('key', entry.key).first();
     if (!has) await db('settings').insert(entry);
   }

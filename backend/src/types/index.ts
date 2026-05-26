@@ -1,4 +1,8 @@
 export type UserRole = 'operator' | 'auditor' | 'admin';
+export type UserType = 'student' | 'employee';
+export type SyncStatus = 'synced' | 'pending' | 'attention';
+export type PrintOperationStatus = 'completed' | 'contingency' | 'attention';
+export type EntryType = 'own' | 'borrowed';
 
 export interface SystemUser {
   id: number;
@@ -16,30 +20,62 @@ export interface Student {
   course: string;
   period: string;
   person_code: string | null;
-  sync_status: 'synced' | 'pending' | 'attention';
+  sync_status: SyncStatus;
   created_at: Date;
   updated_at: Date;
 }
 
-export type PrintOperationStatus = 'completed' | 'contingency' | 'attention';
+export interface Employee {
+  id: number;
+  employee_code: string;
+  name: string;
+  department: string;
+  email: string | null;
+  sync_status: SyncStatus;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface IdentifyResult {
+  user: Student | Employee;
+  user_type: UserType;
+  photo: string | null;
+  available_balance: number;
+  daily_consumed: number;
+  source_active: boolean;
+}
+
+export interface StackedDebit {
+  user_id: number;
+  user_type: UserType;
+  identifier: string;
+  name: string;
+  available: number;
+  sheets_to_debit: number;
+  identify_method?: 'manual' | 'rfid' | 'facial';
+}
 
 export interface PrintOperation {
   id: number;
   operator_id: number;
-  student_id: number;
+  user_type: UserType;
+  user_id: number;
+  student_id: number | null; // legacy, kept during transition
   total_sheets: number;
   status: PrintOperationStatus;
+  identify_method: 'manual' | 'rfid' | 'facial';
   created_at: Date;
 }
-
-export type EntryType = 'own' | 'borrowed';
 
 export interface Entry {
   id: number;
   print_operation_id: number;
-  student_id: number;
+  user_type: UserType;
+  user_id: number;
+  student_id: number | null; // legacy
   sheets: number;
   type: EntryType;
+  identify_method: 'manual' | 'rfid' | 'facial' | null;
   created_at: Date;
 }
 
@@ -85,16 +121,7 @@ export interface SituatorPerson {
 }
 
 export interface VectorAIResult {
-  matricula: string | null; // null = face detected but not in database
+  matricula: string | null;
   confidence: number;
   box: { top: number; right: number; bottom: number; left: number };
-}
-
-export interface StackedDebit {
-  registration_number: string;
-  student_id: number;
-  name: string;
-  available: number;
-  sheets_to_debit: number;
-  identify_method?: 'manual' | 'rfid' | 'facial';
 }

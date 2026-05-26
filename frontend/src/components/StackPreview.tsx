@@ -12,7 +12,7 @@ export function StackPreview({ debits, totalSheets }: StackPreviewProps) {
       <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
         <AlertTriangle size={15} className="text-amber-600 shrink-0" />
         <p className="text-[13px] text-amber-800 font-medium">
-          Saldo insuficiente — débito distribuído em {debits.length} matrícula{debits.length > 1 ? 's' : ''}.
+          Saldo insuficiente — débito distribuído em {debits.length} usuário{debits.length > 1 ? 's' : ''}.
           Total: <strong>{totalSheets} folhas</strong>.
         </p>
       </div>
@@ -20,7 +20,7 @@ export function StackPreview({ debits, totalSheets }: StackPreviewProps) {
       <div className="space-y-2">
         {debits.map((d, i) => (
           <div
-            key={d.student_id}
+            key={`${d.user_type ?? 'student'}-${d.user_id}`}
             className="flex items-center justify-between p-3 bg-white/70 border border-gray-200 rounded-xl animate-fadeIn"
             style={{ animationDelay: `${i * 40}ms` }}
           >
@@ -30,7 +30,7 @@ export function StackPreview({ debits, totalSheets }: StackPreviewProps) {
               </div>
               <div>
                 <p className="text-[13px] font-semibold text-gray-900">{d.name}</p>
-                <p className="text-[11px] text-gray-500">{d.registration_number} · {d.available} disponíveis</p>
+                <p className="text-[11px] text-gray-500">{d.identifier} · {d.available} disponíveis</p>
               </div>
             </div>
             <div className="text-right">

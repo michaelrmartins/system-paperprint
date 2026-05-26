@@ -6,13 +6,16 @@ import { runMigrations } from './db/migrate.js';
 import { startSyncWorker } from './services/syncWorker.js';
 import { authRoutes } from './routes/auth.js';
 import { studentRoutes } from './routes/students.js';
+import { employeeRoutes } from './routes/employees.js';
 import { printRoutes } from './routes/print.js';
 import { settingsRoutes } from './routes/settings.js';
 import { reportRoutes } from './routes/reports.js';
 import { systemUserRoutes } from './routes/systemUsers.js';
 import { zabbixRoutes } from './routes/zabbix.js';
+import { wasteRoutes } from './routes/waste.js';
 import * as lyceumClient from './clients/lyceumClient.js';
 import * as situatorClient from './clients/situatorClient.js';
+import * as nasajonClient from './clients/nasajonClient.js';
 import { requireAuth } from './middleware/auth.js';
 import { addClient, removeClient } from './lib/sseEmitter.js';
 
@@ -29,11 +32,13 @@ await app.register(jwt, {
 
 await app.register(authRoutes);
 await app.register(studentRoutes);
+await app.register(employeeRoutes);
 await app.register(printRoutes);
 await app.register(settingsRoutes);
 await app.register(reportRoutes);
 await app.register(systemUserRoutes);
 await app.register(zabbixRoutes);
+await app.register(wasteRoutes);
 
 // SSE stream — clients subscribe here for real-time push events
 app.get('/events/stream', async (req, reply) => {
@@ -75,6 +80,7 @@ app.get('/events/stream', async (req, reply) => {
 });
 
 app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+
 app.get('/health/lyceum', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async () => {
   const available = await lyceumClient.isAvailable();
   return { available };
@@ -82,6 +88,11 @@ app.get('/health/lyceum', { preHandler: requireAuth(['operator', 'auditor', 'adm
 
 app.get('/health/situator', async () => {
   return situatorClient.testConnection();
+});
+
+app.get('/health/nasajon', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async () => {
+  const available = await nasajonClient.isAvailable();
+  return { available };
 });
 
 try {

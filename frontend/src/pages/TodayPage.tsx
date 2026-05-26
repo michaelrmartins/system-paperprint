@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/api';
+import { IdentifyResult, getUserIdentifier, getUserDetail } from '../types';
 import { Spinner } from '../components/Spinner';
 import { Modal } from '../components/Modal';
-import { Search, Clock, Printer, TrendingUp, TrendingDown, Keyboard, CreditCard, Camera } from 'lucide-react';
+import { Search, Clock, Printer, TrendingUp, TrendingDown, Keyboard, CreditCard, Camera, Briefcase, AlertTriangle, FileX } from 'lucide-react';
 import { SYNC_STATUS_LABELS } from '../lib/format';
 import { useSSE } from '../hooks/useSSE';
 
@@ -13,12 +14,31 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-interface TodayStudent {
+function shortName(full: string): string {
+  const parts = (full || '').trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]}` : parts[0];
+}
+
+interface TodayWasteItem {
   id: number;
-  registration_number: string;
+  type: 'error' | 'blank';
+  sheets: number;
+  operator_login: string;
+  created_at: string;
+}
+
+interface WasteToday {
+  error_sheets: number;
+  blank_sheets: number;
+  events: TodayWasteItem[];
+}
+
+interface TodayUser {
+  id: number;
   name: string;
-  course: string;
-  period: string;
+  identifier: string;
+  detail: string;
+  user_type: 'student' | 'employee';
   quota_used: number;
   sheets_lent: number;
   total_printed: number;
@@ -46,13 +66,13 @@ const METHOD_CLASS: Record<string, string> = {
 
 interface PrimaryEntry {
   id: number;
-  student_id: number;
+  user_id: number;
+  user_type: string;
   sheets: number;
   type: 'own' | 'borrowed';
-  student_name: string;
-  registration_number: string;
-  course?: string;
-  period?: string;
+  user_name: string;
+  user_identifier: string;
+  user_detail?: string;
 }
 
 interface PrimaryOperation {
@@ -72,9 +92,10 @@ interface LoanEntry {
   created_at: string;
   operation_id: number;
   operation_total: number;
-  primary_student_id: number;
-  primary_student_name: string;
-  primary_registration: string;
+  primary_user_id: number;
+  primary_user_type: string;
+  primary_user_name: string;
+  primary_identifier: string;
   operator_login: string;
 }
 
@@ -83,37 +104,41 @@ interface FullHistory {
   as_lender: LoanEntry[];
 }
 
-interface IdentifyResult {
-  student: TodayStudent & { sync_status: string; person_code: string | null };
-  photo: string | null;
-  available_balance: number;
-  daily_consumed: number;
-}
-
 type FilterType = 'all' | 'own' | 'borrowed';
 
 export function TodayPage() {
-  const [students, setStudents] = useState<TodayStudent[]>([]);
+  const [users, setUsers] = useState<TodayUser[]>([]);
+  const [todayWaste, setTodayWaste] = useState<WasteToday>({ error_sheets: 0, blank_sheets: 0, events: [] });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [page, setPage] = useState(1);
 
-  const [selectedStudent, setSelectedStudent] = useState<TodayStudent | null>(null);
+  const [selectedUser, setSelectedUser] = useState<TodayUser | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [studentDetail, setStudentDetail] = useState<IdentifyResult | null>(null);
+  const [userDetail, setUserDetail] = useState<IdentifyResult | null>(null);
   const [fullHistory, setFullHistory] = useState<FullHistory | null>(null);
   const [modalOpsPage, setModalOpsPage] = useState(1);
   const todayDate = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 
   const fetchToday = useCallback(() => {
-    api.get<TodayStudent[]>('/students/today').then((r) => setStudents(r.data)).catch(() => {});
+    Promise.all([
+      api.get<TodayUser[]>('/students/today'),
+      api.get<WasteToday>('/waste/today'),
+    ]).then(([usersRes, wasteRes]) => {
+      setUsers(usersRes.data);
+      setTodayWaste(wasteRes.data);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    api.get<TodayStudent[]>('/students/today')
-      .then((r) => setStudents(r.data))
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.get<TodayUser[]>('/students/today'),
+      api.get<WasteToday>('/waste/today'),
+    ]).then(([usersRes, wasteRes]) => {
+      setUsers(usersRes.data);
+      setTodayWaste(wasteRes.data);
+    }).finally(() => setLoading(false));
 
     const id = setInterval(fetchToday, 30_000);
     return () => clearInterval(id);
@@ -123,31 +148,37 @@ export function TodayPage() {
 
   useEffect(() => { setPage(1); }, [search, filter]);
 
-  const openDetail = async (s: TodayStudent) => {
-    setSelectedStudent(s);
+  const openDetail = async (u: TodayUser) => {
+    setSelectedUser(u);
     setDetailLoading(true);
-    setStudentDetail(null);
+    setUserDetail(null);
     setFullHistory(null);
     setModalOpsPage(1);
     try {
-      const [detailRes, histRes] = await Promise.all([
-        api.post<IdentifyResult>('/students/identify/manual', { registration_number: s.registration_number }),
-        api.get<FullHistory>(`/students/${s.id}/full-history`, { params: { date: todayDate } }),
-      ]);
-      setStudentDetail(detailRes.data);
+      let detailRes;
+      if (u.user_type === 'employee') {
+        detailRes = await api.post<IdentifyResult>('/employees/identify/manual', { employee_code: u.identifier });
+      } else {
+        detailRes = await api.post<IdentifyResult>('/students/identify/manual', { registration_number: u.identifier });
+      }
+      const histEndpoint = u.user_type === 'employee'
+        ? `/employees/${u.id}/full-history`
+        : `/students/${u.id}/full-history`;
+      const histRes = await api.get<FullHistory>(histEndpoint, { params: { date: todayDate } });
+      setUserDetail(detailRes.data);
       setFullHistory(histRes.data);
     } finally {
       setDetailLoading(false);
     }
   };
 
-  const openDetailByEntry = (studentId: number, registrationNumber: string, name: string) => {
+  const openDetailByEntry = (userId: number, userType: string, identifier: string, name: string) => {
     openDetail({
-      id: studentId,
-      registration_number: registrationNumber,
+      id: userId,
       name,
-      course: '',
-      period: '',
+      identifier,
+      detail: '',
+      user_type: userType as 'student' | 'employee',
       quota_used: 0,
       sheets_lent: 0,
       total_printed: 0,
@@ -158,26 +189,24 @@ export function TodayPage() {
     });
   };
 
-  const filtered = students.filter((s) => {
+  const filtered = users.filter((u) => {
     const matchSearch =
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.registration_number.includes(search);
+      u.name.toLowerCase().includes(search.toLowerCase()) ||
+      u.identifier.includes(search);
     if (!matchSearch) return false;
-    if (filter === 'own') return (s.quota_used - s.sheets_lent) > 0;
-    if (filter === 'borrowed') return s.received_loans;
+    if (filter === 'own') return (u.quota_used - u.sheets_lent) > 0;
+    if (filter === 'borrowed') return u.received_loans;
     return true;
   });
 
-  const totalQuota = filtered.reduce((a, s) => a + s.quota_used, 0);
-  const totalPrinted = filtered.reduce((a, s) => a + s.total_printed, 0);
+  const totalQuota = filtered.reduce((a, u) => a + u.quota_used, 0);
+  const totalPrinted = filtered.reduce((a, u) => a + u.total_printed, 0);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const goToPage = (p: number) => setPage(Math.max(1, Math.min(p, totalPages)));
-
-  // Reset to page 1 when search or filter changes — handled inline via safePage
 
   return (
     <div className="space-y-4">
@@ -186,7 +215,8 @@ export function TodayPage() {
         <div>
           <h1 className="text-[18px] font-semibold text-gray-900">Impressões de Hoje</h1>
           <p className="text-[13px] text-gray-500 mt-0.5">
-            {students.length} aluno{students.length !== 1 ? 's' : ''} · {totalPrinted} folhas impressas · {totalQuota} de cota usada
+            {users.length} usuário{users.length !== 1 ? 's' : ''} · {totalPrinted} folhas impressas · {totalQuota} de cota usada
+            {(todayWaste.error_sheets + todayWaste.blank_sheets) > 0 && ` · ${todayWaste.error_sheets + todayWaste.blank_sheets} desperdiçadas`}
           </p>
         </div>
       </div>
@@ -198,7 +228,7 @@ export function TodayPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome ou matrícula"
+            placeholder="Buscar por nome, matrícula ou código"
             className="w-full pl-9 pr-4 py-2.5 text-[14px] bg-white/70 backdrop-blur-sm border border-gray-200 rounded-xl outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
           />
         </div>
@@ -225,157 +255,194 @@ export function TodayPage() {
         <div className="flex justify-center py-12"><Spinner /></div>
       ) : (
         <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass overflow-hidden">
-          {filtered.length === 0 ? (
+          {filtered.length === 0 && (filter !== 'all' || todayWaste.events.length === 0) ? (
             <p className="text-center text-[14px] text-gray-400 py-12">
               {search || filter !== 'all' ? 'Nenhum resultado.' : 'Nenhuma impressão registrada hoje.'}
             </p>
           ) : (
             <>
-              <div className="divide-y divide-gray-100/80">
-                {paginated.map((s, i) => (
-                  <button
-                    key={s.id}
-                    onClick={() => openDetail(s)}
-                    className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-50/60 active:bg-gray-100/60 transition-colors text-left animate-fadeIn"
-                    style={{ animationDelay: `${i * 20}ms` }}
-                  >
-                    {/* Student info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-[13px] font-medium text-gray-900 truncate">{s.name}</p>
-                        {s.identify_method && (
-                          <span className={`flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${METHOD_CLASS[s.identify_method] ?? 'bg-gray-100 text-gray-500'}`}>
-                            {METHOD_ICON[s.identify_method]}
-                            {METHOD_LABEL[s.identify_method]}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-gray-400 truncate">
-                        {s.registration_number}
-                        {s.course && ` · ${s.course}`}
-                        {s.period && ` · ${s.period}`}
-                      </p>
-                    </div>
-
-                    {/* Time + Stats */}
-                    <div className="shrink-0 flex items-center gap-3">
-                      <div className="flex items-center gap-1 text-[11px] text-gray-400">
-                        <Clock size={10} />
-                        {formatTime(s.last_operation_at)}
-                      </div>
-                      {(() => {
-                        const received = s.total_printed - (s.quota_used - s.sheets_lent);
-                        return (
-                          <div className="text-right min-w-[44px]">
-                            <p className="text-[14px] font-bold text-gray-900 leading-tight">{s.quota_used}</p>
-                            <div className="flex items-center justify-end gap-1">
-                              <p className="text-[10px] text-gray-400 leading-none">folhas</p>
-                              {s.received_loans && received > 0 && (
-                                <span className="text-[10px] font-medium text-amber-500">↓{received}</span>
-                              )}
-                              {s.gave_loans && (
-                                <span className="text-[10px] font-medium text-emerald-600">↑{s.sheets_lent}</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Pagination */}
               {filtered.length > 0 && (
-                <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100/80 bg-gray-50/40">
-                  <p className="text-[12px] text-gray-400">
-                    {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
-                  </p>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => goToPage(safePage - 1)}
-                      disabled={safePage === 1}
-                      className="px-2.5 py-1.5 text-[12px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Anterior
-                    </button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
-                      .reduce<(number | '...')[]>((acc, p, idx, arr) => {
-                        if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
-                        acc.push(p);
-                        return acc;
-                      }, [])
-                      .map((p, idx) =>
-                        p === '...' ? (
-                          <span key={`ellipsis-${idx}`} className="px-1.5 text-[12px] text-gray-400">…</span>
-                        ) : (
-                          <button
-                            key={p}
-                            onClick={() => goToPage(p as number)}
-                            className={`w-8 h-8 text-[12px] font-medium rounded-lg transition-colors ${
-                              p === safePage
-                                ? 'bg-gray-900 text-white'
-                                : 'border border-gray-200 text-gray-600 hover:bg-white'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        )
-                      )}
-                    <button
-                      onClick={() => goToPage(safePage + 1)}
-                      disabled={safePage === totalPages}
-                      className="px-2.5 py-1.5 text-[12px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      Próxima
-                    </button>
+                <>
+                  <div className="divide-y divide-gray-100/80">
+                    {paginated.map((u, i) => (
+                      <button
+                        key={`${u.user_type}-${u.id}`}
+                        onClick={() => openDetail(u)}
+                        className="w-full flex items-center gap-3 px-4 py-2 hover:bg-gray-50/60 active:bg-gray-100/60 transition-colors text-left animate-fadeIn"
+                        style={{ animationDelay: `${i * 20}ms` }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {u.user_type === 'employee' && (
+                              <Briefcase size={11} className="shrink-0 text-blue-400" />
+                            )}
+                            <p className="text-[13px] font-medium text-gray-900 truncate">{u.name}</p>
+                            {u.identify_method && (
+                              <span className={`flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${METHOD_CLASS[u.identify_method] ?? 'bg-gray-100 text-gray-500'}`}>
+                                {METHOD_ICON[u.identify_method]}
+                                {METHOD_LABEL[u.identify_method]}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-gray-400 truncate">
+                            {u.identifier}
+                            {u.detail && ` · ${u.detail}`}
+                          </p>
+                        </div>
+
+                        <div className="shrink-0 flex items-center gap-3">
+                          <div className="flex items-center gap-1 text-[11px] text-gray-400">
+                            <Clock size={10} />
+                            {formatTime(u.last_operation_at)}
+                          </div>
+                          {(() => {
+                            const received = u.total_printed - (u.quota_used - u.sheets_lent);
+                            return (
+                              <div className="text-right min-w-[44px]">
+                                <p className="text-[14px] font-bold text-gray-900 leading-tight">{u.quota_used}</p>
+                                <div className="flex items-center justify-end gap-1">
+                                  <p className="text-[10px] text-gray-400 leading-none">folhas</p>
+                                  {u.received_loans && received > 0 && (
+                                    <span className="text-[10px] font-medium text-amber-500">↓{received}</span>
+                                  )}
+                                  {u.gave_loans && (
+                                    <span className="text-[10px] font-medium text-emerald-600">↑{u.sheets_lent}</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                </div>
+
+                  {/* Pagination */}
+                  <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100/80 bg-gray-50/40">
+                    <p className="text-[12px] text-gray-400">
+                      {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => goToPage(safePage - 1)}
+                        disabled={safePage === 1}
+                        className="px-2.5 py-1.5 text-[12px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Anterior
+                      </button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .filter((p) => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                        .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                          if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                          acc.push(p);
+                          return acc;
+                        }, [])
+                        .map((p, idx) =>
+                          p === '...' ? (
+                            <span key={`ellipsis-${idx}`} className="px-1.5 text-[12px] text-gray-400">…</span>
+                          ) : (
+                            <button
+                              key={p}
+                              onClick={() => goToPage(p as number)}
+                              className={`w-8 h-8 text-[12px] font-medium rounded-lg transition-colors ${
+                                p === safePage
+                                  ? 'bg-gray-900 text-white'
+                                  : 'border border-gray-200 text-gray-600 hover:bg-white'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          )
+                        )}
+                      <button
+                        onClick={() => goToPage(safePage + 1)}
+                        disabled={safePage === totalPages}
+                        className="px-2.5 py-1.5 text-[12px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Waste events — only in 'all' filter */}
+              {filter === 'all' && todayWaste.events.length > 0 && (
+                <>
+                  <div className={`px-4 py-2 bg-gray-50/40 ${filtered.length > 0 ? 'border-t border-gray-100/80' : ''}`}>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Desperdício registrado</p>
+                  </div>
+                  <div className="divide-y divide-gray-100/80">
+                    {todayWaste.events.map((e) => (
+                      <div key={`waste-${e.id}`} className="flex items-center gap-3 px-4 py-2">
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${e.type === 'error' ? 'bg-red-50 text-red-400' : 'bg-gray-100 text-gray-400'}`}>
+                          {e.type === 'error' ? <AlertTriangle size={12} /> : <FileX size={12} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium text-gray-700">
+                            {e.type === 'error' ? 'Erro de impressão' : 'Folhas em branco'}
+                          </p>
+                          <p className="text-[11px] text-gray-400">{e.operator_login} · {formatTime(e.created_at)}</p>
+                        </div>
+                        <div className="text-right min-w-[44px]">
+                          <p className="text-[14px] font-bold text-gray-500 leading-tight">{e.sheets}</p>
+                          <p className="text-[10px] text-gray-400 leading-none">folhas</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </>
           )}
         </div>
       )}
 
-      {/* Student detail modal */}
+      {/* Detail modal */}
       <Modal
-        open={!!selectedStudent}
-        onClose={() => setSelectedStudent(null)}
-        title="Detalhes do Aluno"
+        open={!!selectedUser}
+        onClose={() => setSelectedUser(null)}
+        title={selectedUser?.user_type === 'employee' ? 'Detalhes do Funcionário' : 'Detalhes do Aluno'}
         size="xl"
       >
         {detailLoading ? (
           <div className="flex justify-center py-8"><Spinner /></div>
-        ) : studentDetail && fullHistory ? (
+        ) : userDetail && fullHistory ? (
           <div className="space-y-5">
             {/* Header with photo */}
             <div className="flex gap-4">
               <div className="shrink-0">
-                {studentDetail.photo ? (
+                {userDetail.photo ? (
                   <img
-                    src={`data:image/jpeg;base64,${studentDetail.photo}`}
-                    alt={studentDetail.student.name}
+                    src={`data:image/jpeg;base64,${userDetail.photo}`}
+                    alt={userDetail.user.name}
                     className="w-16 h-16 rounded-xl object-cover border border-white/60 shadow-sm"
                   />
+                ) : userDetail.user_type === 'employee' ? (
+                  <div className="w-16 h-16 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-400">
+                    <Briefcase size={24} />
+                  </div>
                 ) : (
                   <div className="w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-xl font-semibold">
-                    {studentDetail.student.name.charAt(0).toUpperCase()}
+                    {userDetail.user.name.charAt(0).toUpperCase()}
                   </div>
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-gray-900">{studentDetail.student.name}</p>
-                <p className="text-[12px] text-gray-500 mt-0.5">{studentDetail.student.registration_number}</p>
-                {studentDetail.student.course && (
-                  <p className="text-[12px] text-gray-500">
-                    {studentDetail.student.course}
-                    {studentDetail.student.period && ` · ${studentDetail.student.period}`}
-                  </p>
-                )}
-                {studentDetail.student.sync_status !== 'synced' && (
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[15px] font-semibold text-gray-900">{userDetail.user.name}</p>
+                  {userDetail.user_type === 'employee' && (
+                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">Funcionário</span>
+                  )}
+                </div>
+                <p className="text-[12px] text-gray-500 mt-0.5">{getUserIdentifier(userDetail.user, userDetail.user_type)}</p>
+                {(() => {
+                  const detail = getUserDetail(userDetail.user, userDetail.user_type);
+                  return detail ? <p className="text-[12px] text-gray-500">{detail}</p> : null;
+                })()}
+                {userDetail.user.sync_status !== 'synced' && (
                   <span className="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                    {SYNC_STATUS_LABELS[studentDetail.student.sync_status]}
+                    {SYNC_STATUS_LABELS[userDetail.user.sync_status]}
                   </span>
                 )}
               </div>
@@ -426,31 +493,23 @@ export function TodayPage() {
                           <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
                         </div>
                         {op.entries.map((e) => {
-                          const parts = e.student_name.trim().split(/\s+/);
-                          const displayName = parts.length > 1
-                            ? `${parts[0]} ${parts[parts.length - 1]}`
-                            : parts[0];
+                          const isOwn = e.user_id === selectedUser?.id && e.user_type === selectedUser?.user_type;
+                          const displayName = shortName(e.user_name ?? '');
                           return (
                             <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
                               <div className="flex items-center gap-2">
                                 <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${
-                                  e.student_id === selectedStudent?.id
-                                    ? 'bg-blue-50 text-blue-700'
-                                    : 'bg-amber-50 text-amber-700'
+                                  isOwn ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
                                 }`}>
-                                  {e.student_id === selectedStudent?.id ? 'Própria' : 'Empréstimo'}
+                                  {isOwn ? 'Própria' : 'Empréstimo'}
                                 </span>
-                                {e.student_id !== selectedStudent?.id && (
+                                {!isOwn && (
                                   <button
-                                    onClick={(ev) => { ev.stopPropagation(); openDetailByEntry(e.student_id, e.registration_number, e.student_name); }}
+                                    onClick={(ev) => { ev.stopPropagation(); openDetailByEntry(e.user_id, e.user_type, e.user_identifier, e.user_name); }}
                                     className="min-w-0 text-left group"
                                   >
                                     <p className="text-[12px] font-medium text-gray-800 leading-tight group-hover:text-blue-600 transition-colors">{displayName}</p>
-                                    <p className="text-[10px] text-gray-400 leading-tight truncate">
-                                      {e.registration_number}
-                                      {e.course ? ` · ${e.course}` : ''}
-                                      {e.period ? ` · ${e.period}` : ''}
-                                    </p>
+                                    <p className="text-[10px] text-gray-400 leading-tight truncate">{e.user_identifier}</p>
                                   </button>
                                 )}
                               </div>
@@ -492,17 +551,17 @@ export function TodayPage() {
             {fullHistory.as_lender.length > 0 && (
               <div>
                 <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">
-                  Cota cedida a outros alunos
+                  Cota cedida a outros usuários
                 </p>
                 <div className="rounded-xl border border-gray-100 overflow-hidden divide-y divide-gray-100">
                   {fullHistory.as_lender.map((e) => (
                     <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
                       <button
-                        onClick={() => openDetailByEntry(e.primary_student_id, e.primary_registration, e.primary_student_name)}
+                        onClick={() => openDetailByEntry(e.primary_user_id, e.primary_user_type, e.primary_identifier, e.primary_user_name)}
                         className="text-left group"
                       >
-                        <p className="text-[13px] font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{e.primary_student_name}</p>
-                        <p className="text-[11px] text-gray-400">{e.primary_registration} · op. #{e.operation_id}</p>
+                        <p className="text-[13px] font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{e.primary_user_name}</p>
+                        <p className="text-[11px] text-gray-400">{e.primary_identifier} · op. #{e.operation_id}</p>
                       </button>
                       <span className="text-[13px] font-bold text-emerald-700">{e.sheets} folhas</span>
                     </div>

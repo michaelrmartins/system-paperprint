@@ -1,6 +1,6 @@
 import { db } from '../db/knex.js';
 import * as lyceumClient from '../clients/lyceumClient.js';
-import { Student } from '../types/index.js';
+import { Student, IdentifyResult } from '../types/index.js';
 import { logger } from '../lib/logger.js';
 import { getAvailableBalance, getDailyConsumed } from './quotaService.js';
 
@@ -20,13 +20,7 @@ interface FindOptions {
 export async function findOrCreateStudent(
   registrationNumber: string,
   options: FindOptions = {}
-): Promise<{
-  student: Student;
-  photo: string | null;
-  available_balance: number;
-  daily_consumed: number;
-  lyceum_active: boolean;
-}> {
+): Promise<IdentifyResult> {
   const { strict = false } = options;
 
   let lyceumData = null;
@@ -99,9 +93,9 @@ export async function findOrCreateStudent(
   }
 
   const [available_balance, daily_consumed] = await Promise.all([
-    getAvailableBalance(student.id),
-    getDailyConsumed(student.id),
+    getAvailableBalance(student.id, 'student'),
+    getDailyConsumed(student.id, 'student'),
   ]);
 
-  return { student, photo, available_balance, daily_consumed, lyceum_active: lyceumOnline };
+  return { user: student, user_type: 'student', photo, available_balance, daily_consumed, source_active: lyceumOnline };
 }

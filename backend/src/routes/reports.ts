@@ -3,12 +3,15 @@ import { requireAuth } from '../middleware/auth.js';
 import { db } from '../db/knex.js';
 
 export async function reportRoutes(app: FastifyInstance) {
-  // Consumption by course
+  // Consumption by course — student-specific
   app.get('/reports/by-course', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('entries')
-      .join('students', 'entries.student_id', 'students.id')
+      .join('students', function () {
+        this.on('entries.user_type', db.raw("'student'")).andOn('entries.user_id', 'students.id');
+      })
       .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+      .where('entries.user_type', 'student')
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', end);
@@ -18,12 +21,15 @@ export async function reportRoutes(app: FastifyInstance) {
       .orderBy('total_sheets', 'desc');
   });
 
-  // Consumption by period
+  // Consumption by period — student-specific
   app.get('/reports/by-period', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('print_operations')
-      .join('students', 'print_operations.student_id', 'students.id')
+      .join('students', function () {
+        this.on('print_operations.user_type', db.raw("'student'")).andOn('print_operations.user_id', 'students.id');
+      })
       .join('entries', 'entries.print_operation_id', 'print_operations.id')
+      .where('print_operations.user_type', 'student')
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', end);
@@ -33,23 +39,32 @@ export async function reportRoutes(app: FastifyInstance) {
       .orderBy('total_sheets', 'desc');
   });
 
-  // Top N students by consumption
+  // Top users by consumption — dual JOIN, includes both students and employees
   app.get('/reports/top-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end, limit = '20' } = req.query as { start?: string; end?: string; limit?: string };
-    return db('print_operations')
-      .join('students', 'print_operations.student_id', 'students.id')
-      .join('entries', 'entries.print_operation_id', 'print_operations.id')
+    return db('entries')
+      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+      .leftJoin('students', function () {
+        this.on('entries.user_type', db.raw("'student'")).andOn('entries.user_id', 'students.id');
+      })
+      .leftJoin('employees', function () {
+        this.on('entries.user_type', db.raw("'employee'")).andOn('entries.user_id', 'employees.id');
+      })
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);
         if (end) q.where('print_operations.created_at', '<=', end);
       })
-      .groupBy('students.id', 'students.name', 'students.registration_number', 'students.course', 'students.period')
+      .groupBy(
+        'entries.user_type', 'entries.user_id',
+        'students.id', 'students.name', 'students.registration_number', 'students.course', 'students.period',
+        'employees.id', 'employees.name', 'employees.employee_code', 'employees.department',
+      )
       .select(
-        'students.id',
-        'students.name',
-        'students.registration_number',
-        'students.course',
-        'students.period',
+        'entries.user_type',
+        db.raw("COALESCE(students.id, employees.id) as id"),
+        db.raw("COALESCE(students.name, employees.name) as name"),
+        db.raw("COALESCE(students.registration_number, employees.employee_code) as identifier"),
+        db.raw("COALESCE(students.course, employees.department, '') as detail"),
         db.raw('SUM(entries.sheets) as total_sheets')
       )
       .orderBy('total_sheets', 'desc')
@@ -71,13 +86,18 @@ export async function reportRoutes(app: FastifyInstance) {
       .orderBy('month');
   });
 
-  // Audit log
+  // Audit log — dual JOIN for entry user
   app.get('/reports/audit', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end } = req.query as { start?: string; end?: string };
     return db('audit_log')
       .join('system_users', 'audit_log.operator_id', 'system_users.id')
       .join('entries', 'audit_log.entry_id', 'entries.id')
-      .join('students', 'entries.student_id', 'students.id')
+      .leftJoin('students', function () {
+        this.on('entries.user_type', db.raw("'student'")).andOn('entries.user_id', 'students.id');
+      })
+      .leftJoin('employees', function () {
+        this.on('entries.user_type', db.raw("'employee'")).andOn('entries.user_id', 'employees.id');
+      })
       .modify((q) => {
         if (start) q.where('audit_log.created_at', '>=', start);
         if (end) q.where('audit_log.created_at', '<=', end);
@@ -91,10 +111,36 @@ export async function reportRoutes(app: FastifyInstance) {
         'audit_log.reason',
         db.raw(`to_char(audit_log.created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') as created_at`),
         'system_users.login as operator_login',
-        'students.name as student_name',
-        'students.registration_number'
+        'entries.user_type',
+        db.raw("COALESCE(students.name, employees.name) as user_name"),
+        db.raw("COALESCE(students.registration_number, employees.employee_code) as user_identifier"),
       )
       .orderBy('audit_log.created_at', 'desc');
+  });
+
+  // Top employees by sheets printed
+  app.get('/reports/top-employees', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
+    const { start, end, limit = '20' } = req.query as { start?: string; end?: string; limit?: string };
+    return db('entries')
+      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+      .join('employees', function () {
+        this.on('entries.user_type', db.raw("'employee'")).andOn('entries.user_id', 'employees.id');
+      })
+      .where('entries.user_type', 'employee')
+      .modify((q) => {
+        if (start) q.where('print_operations.created_at', '>=', start);
+        if (end) q.where('print_operations.created_at', '<=', end);
+      })
+      .groupBy('employees.id', 'employees.name', 'employees.employee_code', 'employees.department')
+      .select(
+        'employees.id',
+        'employees.name',
+        'employees.employee_code',
+        'employees.department',
+        db.raw('SUM(entries.sheets) as total_sheets'),
+      )
+      .orderBy('total_sheets', 'desc')
+      .limit(parseInt(limit));
   });
 
   // Peak hours — operations and sheets by hour of day
@@ -190,13 +236,16 @@ export async function reportRoutes(app: FastifyInstance) {
       .orderBy('day');
   });
 
-  // Students within a period+course combo (for expandable rows)
+  // Students within a period+course combo (for expandable rows) — student-specific
   app.get('/reports/period-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { period, course, start, end } = req.query as { period?: string; course?: string; start?: string; end?: string };
     if (!period) return [];
     return db('print_operations')
-      .join('students', 'print_operations.student_id', 'students.id')
+      .join('students', function () {
+        this.on('print_operations.user_type', db.raw("'student'")).andOn('print_operations.user_id', 'students.id');
+      })
       .join('entries', 'entries.print_operation_id', 'print_operations.id')
+      .where('print_operations.user_type', 'student')
       .where('students.period', period)
       .modify((q) => {
         if (course) q.where('students.course', course);
@@ -229,6 +278,7 @@ export async function reportRoutes(app: FastifyInstance) {
         'invalid_document_attempts.situation_detail',
         'invalid_document_attempts.context',
         'invalid_document_attempts.identify_method',
+        'invalid_document_attempts.primary_user_type',
         db.raw(`to_char(invalid_document_attempts.created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD"T"HH24:MI:SS') as created_at`),
         'system_users.login as operator_login',
         'primary_s.name as primary_student_name',

@@ -1,25 +1,32 @@
 import { FastifyInstance } from 'fastify';
 import { requireAuth } from '../middleware/auth.js';
 import { registerPrint, registerContingencyPrint, calculateStackedDebits, adjustEntry } from '../services/printService.js';
-import { JwtPayload } from '../types/index.js';
+import { JwtPayload, StackedDebit, UserType } from '../types/index.js';
+import { detectUserType } from '../lib/documentUtils.js';
 import { db } from '../db/knex.js';
 import { broadcast } from '../lib/sseEmitter.js';
 
 export async function printRoutes(app: FastifyInstance) {
-  // Preview stacked debits before confirming
+  // Preview stacked debits before confirming — polymorphic
   app.post('/print/preview-stack', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
-    const { primary_student_id, total_sheets, extra_student_ids } = req.body as {
-      primary_student_id: number;
+    const { primary_user_id, primary_user_type, total_sheets, extra_users } = req.body as {
+      primary_user_id: number;
+      primary_user_type: UserType;
       total_sheets: number;
-      extra_student_ids: number[];
+      extra_users: Array<{ user_id: number; user_type: UserType }>;
     };
 
-    if (!primary_student_id || !total_sheets || total_sheets <= 0) {
+    if (!primary_user_id || !primary_user_type || !total_sheets || total_sheets <= 0) {
       return reply.status(400).send({ error: 'INVALID_REQUEST' });
     }
 
     try {
-      const debits = await calculateStackedDebits(primary_student_id, total_sheets, extra_student_ids || []);
+      const debits = await calculateStackedDebits(
+        primary_user_id,
+        primary_user_type,
+        total_sheets,
+        extra_users || []
+      );
       return { debits };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'UNKNOWN_ERROR';
@@ -30,24 +37,26 @@ export async function printRoutes(app: FastifyInstance) {
     }
   });
 
-  // Confirm and register a print operation
+  // Confirm and register a print operation — polymorphic
   app.post('/print/register', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const operator = req.user as JwtPayload;
-    const { primary_student_id, total_sheets, stacked_debits, identify_method } = req.body as {
-      primary_student_id: number;
+    const { primary_user_id, primary_user_type, total_sheets, stacked_debits, identify_method } = req.body as {
+      primary_user_id: number;
+      primary_user_type: UserType;
       total_sheets: number;
-      stacked_debits: Array<{ student_id: number; registration_number: string; name: string; available: number; sheets_to_debit: number }>;
+      stacked_debits: StackedDebit[];
       identify_method?: 'manual' | 'rfid' | 'facial';
     };
 
-    if (!primary_student_id || !total_sheets || !stacked_debits?.length) {
+    if (!primary_user_id || !primary_user_type || !total_sheets || !stacked_debits?.length) {
       return reply.status(400).send({ error: 'INVALID_REQUEST' });
     }
 
     try {
       const operation = await registerPrint({
         operator_id: operator.sub,
-        primary_student_id,
+        primary_user_id,
+        primary_user_type,
         total_sheets,
         stacked_debits,
         identify_method: identify_method || 'manual',
@@ -59,23 +68,29 @@ export async function printRoutes(app: FastifyInstance) {
       if (msg.startsWith('INSUFFICIENT_BALANCE')) {
         return reply.status(409).send({ error: msg });
       }
-      if (msg === 'DUPLICATE_STUDENT_IN_DEBITS') {
-        return reply.status(400).send({ error: 'DUPLICATE_STUDENT_IN_DEBITS' });
+      if (msg === 'DUPLICATE_USER_IN_DEBITS') {
+        return reply.status(400).send({ error: 'DUPLICATE_USER_IN_DEBITS' });
       }
       throw err;
     }
   });
 
-  // Contingency mode
+  // Contingency mode — auto-detects user_type from identifier when not provided
   app.post('/print/contingency', { preHandler: requireAuth(['operator', 'admin']) }, async (req, reply) => {
     const operator = req.user as JwtPayload;
-    const { registration_number, sheets } = req.body as { registration_number: string; sheets: number };
+    const { identifier, sheets, user_type } = req.body as {
+      identifier: string;
+      sheets: number;
+      user_type?: UserType;
+    };
 
-    if (!registration_number || !sheets || sheets <= 0) {
+    if (!identifier || !sheets || sheets <= 0) {
       return reply.status(400).send({ error: 'INVALID_REQUEST' });
     }
 
-    const operation = await registerContingencyPrint(operator.sub, registration_number, sheets);
+    const resolvedType: UserType = user_type ?? detectUserType(identifier);
+
+    const operation = await registerContingencyPrint(operator.sub, identifier, sheets, resolvedType);
     broadcast('print_registered', { operation_id: operation.id });
     return { operation_id: operation.id, status: operation.status };
   });
@@ -100,21 +115,28 @@ export async function printRoutes(app: FastifyInstance) {
     }
   });
 
-  // Get recent print operations (last N, ordered by created_at DESC)
+  // Get recent print operations (last N, ordered by created_at DESC) — dual JOIN
   app.get('/print/operations/recent', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { limit: limitParam } = req.query as { limit?: string };
     const limit = Math.max(1, Math.min(parseInt(limitParam ?? '10') || 10, 200));
 
     const operations = await db('print_operations')
-      .join('students', 'print_operations.student_id', 'students.id')
+      .leftJoin('students', function () {
+        this.on('print_operations.user_type', db.raw("'student'"))
+          .andOn('print_operations.user_id', 'students.id');
+      })
+      .leftJoin('employees', function () {
+        this.on('print_operations.user_type', db.raw("'employee'"))
+          .andOn('print_operations.user_id', 'employees.id');
+      })
       .join('system_users', 'print_operations.operator_id', 'system_users.id')
       .whereRaw("print_operations.created_at >= CURRENT_DATE")
       .select(
         'print_operations.*',
-        'students.name as student_name',
-        'students.registration_number',
-        'students.course as student_course',
-        'students.period as student_period',
+        db.raw("COALESCE(students.name, employees.name) as user_name"),
+        db.raw("COALESCE(students.registration_number, employees.employee_code) as user_identifier"),
+        db.raw("COALESCE(students.course, employees.department, '') as user_detail"),
+        'print_operations.user_type',
         'system_users.login as operator_login'
       )
       .orderBy('print_operations.created_at', 'desc')
@@ -125,12 +147,17 @@ export async function printRoutes(app: FastifyInstance) {
     const operationIds = operations.map((op) => op.id);
 
     const allEntries = await db('entries')
-      .join('students', 'entries.student_id', 'students.id')
+      .leftJoin('students', function () {
+        this.on('entries.user_type', db.raw("'student'")).andOn('entries.user_id', 'students.id');
+      })
+      .leftJoin('employees', function () {
+        this.on('entries.user_type', db.raw("'employee'")).andOn('entries.user_id', 'employees.id');
+      })
       .whereIn('entries.print_operation_id', operationIds)
       .select(
         'entries.*',
-        'students.name as student_name',
-        'students.registration_number'
+        db.raw("COALESCE(students.name, employees.name) as user_name"),
+        db.raw("COALESCE(students.registration_number, employees.employee_code) as user_identifier"),
       );
 
     const entriesByOperation = allEntries.reduce<Record<number, typeof allEntries>>((acc, entry) => {
@@ -148,18 +175,27 @@ export async function printRoutes(app: FastifyInstance) {
     return { operations: result };
   });
 
-  // Get single operation with entries
+  // Get single operation with entries — dual JOIN
   app.get('/print/operations/:id', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req, reply) => {
     const { id } = req.params as { id: string };
 
     const operation = await db('print_operations')
-      .join('students', 'print_operations.student_id', 'students.id')
+      .leftJoin('students', function () {
+        this.on('print_operations.user_type', db.raw("'student'"))
+          .andOn('print_operations.user_id', 'students.id');
+      })
+      .leftJoin('employees', function () {
+        this.on('print_operations.user_type', db.raw("'employee'"))
+          .andOn('print_operations.user_id', 'employees.id');
+      })
       .join('system_users', 'print_operations.operator_id', 'system_users.id')
       .where('print_operations.id', parseInt(id))
       .select(
         'print_operations.*',
-        'students.name as student_name',
-        'students.registration_number',
+        db.raw("COALESCE(students.name, employees.name) as user_name"),
+        db.raw("COALESCE(students.registration_number, employees.employee_code) as user_identifier"),
+        db.raw("COALESCE(students.course, employees.department, '') as user_detail"),
+        'print_operations.user_type',
         'system_users.login as operator_login'
       )
       .first();
@@ -167,9 +203,18 @@ export async function printRoutes(app: FastifyInstance) {
     if (!operation) return reply.status(404).send({ error: 'NOT_FOUND' });
 
     const entries = await db('entries')
-      .join('students', 'entries.student_id', 'students.id')
+      .leftJoin('students', function () {
+        this.on('entries.user_type', db.raw("'student'")).andOn('entries.user_id', 'students.id');
+      })
+      .leftJoin('employees', function () {
+        this.on('entries.user_type', db.raw("'employee'")).andOn('entries.user_id', 'employees.id');
+      })
       .where('entries.print_operation_id', parseInt(id))
-      .select('entries.*', 'students.name as student_name', 'students.registration_number');
+      .select(
+        'entries.*',
+        db.raw("COALESCE(students.name, employees.name) as user_name"),
+        db.raw("COALESCE(students.registration_number, employees.employee_code) as user_identifier"),
+      );
 
     return { operation, entries };
   });

@@ -10,11 +10,15 @@ import { AuditEntry } from '../types';
 import { Search, ChevronRight, ChevronDown } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'daily' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit' | 'invalid-docs';
+type ReportTab = 'course' | 'period' | 'top' | 'monthly' | 'daily' | 'hours' | 'operator' | 'loan-type' | 'identify-method' | 'history' | 'audit' | 'invalid-docs' | 'employees' | 'waste';
 
 interface CourseRow    { course: string; total_sheets: string }
 interface PeriodRow    { period: string; course: string; total_sheets: string }
 interface TopRow       { id: number; name: string; registration_number: string; course: string; period: string; total_sheets: string }
+interface EmployeeRow  { id: number; name: string; employee_code: string; department: string; total_sheets: string }
+interface WasteEvent   { id: number; type: 'error' | 'blank'; sheets: number; operator_login: string; created_at: string }
+interface WasteDayRow  { day: string; type: 'error' | 'blank'; total_sheets: number; total_events: number }
+interface WasteSummary { error_sheets: number; blank_sheets: number; total_events: number; events: WasteEvent[]; by_date: WasteDayRow[] }
 interface MonthlyRow   { month: number; total_sheets: string; total_operations: string }
 interface DailyRow     { day: string; total_sheets: string; total_operations: string }
 interface HourRow      { hour: number; total_operations: number; total_sheets: number }
@@ -124,6 +128,9 @@ export function ReportsPage() {
   const [topHistoryPage, setTopHistoryPage] = useState(1);
   const TOP_HISTORY_PAGE_SIZE = 10;
 
+  // Waste tab
+  const [wasteSummary, setWasteSummary] = useState<WasteSummary | null>(null);
+
   // History tab
   const [histReg, setHistReg]           = useState('');
   const [histStudentId, setHistStudentId] = useState<number | null>(null);
@@ -141,6 +148,12 @@ export function ReportsPage() {
       if (tab === 'monthly') { params.set('year', year); }
       else { if (start) params.set('start', start); if (end) params.set('end', end); }
 
+      if (tab === 'waste') {
+        const res = await api.get<WasteSummary>(`/waste/summary?${params}`);
+        setWasteSummary(res.data);
+        return;
+      }
+
       const ep: Record<string, string> = {
         course: '/reports/by-course', period: '/reports/by-period',
         top: '/reports/top-students', monthly: '/reports/monthly',
@@ -148,6 +161,7 @@ export function ReportsPage() {
         hours: '/reports/by-hour', operator: '/reports/by-operator',
         'loan-type': '/reports/own-vs-borrowed', 'identify-method': '/reports/by-identify-method',
         audit: '/reports/audit', 'invalid-docs': '/reports/invalid-documents',
+        employees: '/reports/top-employees',
       };
       const res = await api.get<unknown[]>(`${ep[tab]}?${params}`);
       setData(res.data);
@@ -162,6 +176,7 @@ export function ReportsPage() {
 
   useEffect(() => {
     setData([]);
+    setWasteSummary(null);
     setLoadError('');
     setExpandedPeriods(new Set());
     setPeriodStudents({});
@@ -211,8 +226,8 @@ export function ReportsPage() {
     if (!histReg.trim()) return;
     setHistSearching(true); setHistError(''); setHistData([]);
     try {
-      const idRes = await api.post<{ student: { id: number } }>('/students/identify/manual', { registration_number: histReg.trim() });
-      const sid = idRes.data.student.id;
+      const idRes = await api.post<{ user: { id: number } }>('/students/identify/manual', { registration_number: histReg.trim() });
+      const sid = idRes.data.user.id;
       setHistStudentId(sid);
       const params = new URLSearchParams();
       if (histDate) params.set('date', histDate);
@@ -226,18 +241,20 @@ export function ReportsPage() {
     { key: 'course',          label: 'Por Curso' },
     { key: 'period',          label: 'Por Período' },
     { key: 'top',             label: 'Top Alunos' },
+    { key: 'employees',       label: 'Funcionários' },
     { key: 'monthly',         label: 'Mensal' },
     { key: 'daily',           label: 'Diário' },
     { key: 'hours',           label: 'Horários de Pico' },
     { key: 'operator',        label: 'Por Operador' },
     { key: 'loan-type',       label: 'Próprias vs Emp.' },
     { key: 'identify-method', label: 'Identificação' },
+    { key: 'waste',           label: 'Desperdício' },
     { key: 'history',         label: 'Histórico' },
     { key: 'audit',           label: 'Auditoria' },
     { key: 'invalid-docs',    label: 'Docs. Inválidos' },
   ];
 
-  const noData = !loading && data.length === 0 && tab !== 'history' && tab !== 'hours';
+  const noData = !loading && data.length === 0 && tab !== 'history' && tab !== 'hours' && tab !== 'waste';
 
   return (
     <div className="space-y-4">
@@ -727,6 +744,143 @@ export function ReportsPage() {
               </tfoot>
             </table>
           </TableWrap>
+        );
+      })()}
+
+      {/* ── Employees ── */}
+      {!loading && tab === 'employees' && data.length > 0 && (() => {
+        const rows = data as EmployeeRow[];
+        const top10 = rows.slice(0, 10);
+        const rev = [...top10].reverse();
+        return (
+          <div className="space-y-4">
+            <Card>
+              <ReactECharts option={hBar(rev.map(r => r.name), rev.map(r => parseInt(r.total_sheets)), 'Folhas')}
+                style={{ height: `${Math.max(200, top10.length * 32)}px` }} opts={{ renderer: 'svg' }} />
+            </Card>
+            <TableWrap>
+              <table className="w-full text-[13px]">
+                <thead className="bg-gray-50/80 border-b border-gray-100">
+                  <tr><Th>#</Th><Th>Funcionário</Th><Th>Código</Th><Th>Departamento</Th><Th right>Folhas</Th></tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100/80">
+                  {rows.map((r, i) => (
+                    <tr key={r.id} className="hover:bg-gray-50/40">
+                      <td className="px-5 py-3 text-gray-400 font-medium w-10">{i + 1}</td>
+                      <td className="px-5 py-3 font-medium text-gray-900">{r.name}</td>
+                      <td className="px-5 py-3 font-mono text-gray-500">{r.employee_code}</td>
+                      <td className="px-5 py-3 text-gray-500">{r.department || '—'}</td>
+                      <td className="px-5 py-3 text-right font-bold text-gray-900">{r.total_sheets}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableWrap>
+          </div>
+        );
+      })()}
+
+      {/* ── Waste (errors & blank pages) ── */}
+      {!loading && tab === 'waste' && wasteSummary && (() => {
+        const total = wasteSummary.error_sheets + wasteSummary.blank_sheets;
+        const pieData = [
+          { name: 'Erros de impressão', value: wasteSummary.error_sheets },
+          { name: 'Folhas em branco', value: wasteSummary.blank_sheets },
+        ].filter(d => d.value > 0);
+
+        const fmtDay = (d: string) => { const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${dd}/${m}/${y.slice(2)}`; };
+
+        // Build daily stacked data
+        const days = [...new Set(wasteSummary.by_date.map(r => String(r.day).slice(0, 10)))].sort();
+        const errorByDay = new Map(wasteSummary.by_date.filter(r => r.type === 'error').map(r => [String(r.day).slice(0, 10), r.total_sheets]));
+        const blankByDay = new Map(wasteSummary.by_date.filter(r => r.type === 'blank').map(r => [String(r.day).slice(0, 10), r.total_sheets]));
+
+        return (
+          <div className="space-y-4">
+            {/* Stat cards */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: 'Total de folhas', value: total, color: 'text-gray-900' },
+                { label: 'Erros de impressão', value: wasteSummary.error_sheets, color: 'text-red-600' },
+                { label: 'Folhas em branco', value: wasteSummary.blank_sheets, color: 'text-gray-500' },
+              ].map(item => (
+                <div key={item.label} className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-4 text-center">
+                  <p className={`text-[28px] font-bold ${item.color}`}>{item.value}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{item.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {pieData.length > 0 && (
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Distribuição</p>
+                  <ReactECharts
+                    option={{ ...pie(pieData), color: ['#dc2626', '#d1d1d6'] }}
+                    style={{ height: '220px' }} opts={{ renderer: 'svg' }} />
+                </Card>
+                {days.length > 0 && (
+                  <Card>
+                    <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Por dia</p>
+                    <ReactECharts
+                      option={{
+                        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        legend: { bottom: 0, textStyle: { fontSize: 10 } },
+                        grid: { left: 8, right: 8, top: 8, bottom: 28, containLabel: true },
+                        color: ['#dc2626', '#d1d1d6'],
+                        xAxis: { type: 'category', data: days.map(fmtDay), axisLabel: { fontSize: 10, color: '#636366' }, axisLine: { show: false }, axisTick: { show: false } },
+                        yAxis: { type: 'value', axisLabel: { fontSize: 10, color: '#8e8e93' }, splitLine: { lineStyle: { color: '#f5f5f7', type: 'dashed' as const } }, axisLine: { show: false }, axisTick: { show: false } },
+                        series: [
+                          { name: 'Erros', type: 'bar', stack: 'total', data: days.map(d => errorByDay.get(d) ?? 0), itemStyle: { borderRadius: [0, 0, 0, 0] }, barMaxWidth: 24 },
+                          { name: 'Brancas', type: 'bar', stack: 'total', data: days.map(d => blankByDay.get(d) ?? 0), itemStyle: { borderRadius: [3, 3, 0, 0] }, barMaxWidth: 24 },
+                        ],
+                      }}
+                      style={{ height: '220px' }} opts={{ renderer: 'svg' }} />
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {/* Events table */}
+            {wasteSummary.events.length > 0 && (
+              <TableWrap>
+                <table className="w-full text-[13px]">
+                  <thead className="bg-gray-50/80 border-b border-gray-100">
+                    <tr><Th>Tipo</Th><Th>Operador</Th><Th right>Folhas</Th><Th right>Data/Hora</Th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100/80">
+                    {wasteSummary.events.map(e => (
+                      <tr key={e.id} className="hover:bg-gray-50/40">
+                        <td className="px-5 py-3">
+                          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${e.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {e.type === 'error' ? 'Erro' : 'Em branco'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-gray-500">{e.operator_login}</td>
+                        <td className="px-5 py-3 text-right font-bold text-gray-900">{e.sheets}</td>
+                        <td className="px-5 py-3 text-right text-gray-400 whitespace-nowrap">
+                          {new Date(e.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t border-gray-200 bg-gray-50/60">
+                    <tr>
+                      <td colSpan={2} className="px-5 py-3 text-[12px] text-gray-500">
+                        {wasteSummary.total_events} evento{wasteSummary.total_events !== 1 ? 's' : ''}
+                      </td>
+                      <td className="px-5 py-3 text-right font-bold">{total}</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </TableWrap>
+            )}
+
+            {wasteSummary.events.length === 0 && (
+              <p className="text-center text-[14px] text-gray-400 py-12">Sem registros de desperdício para o período.</p>
+            )}
+          </div>
         );
       })()}
 

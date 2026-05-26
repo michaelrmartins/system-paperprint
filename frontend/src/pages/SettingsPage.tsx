@@ -22,8 +22,8 @@ interface ZabbixConfig {
 type SettingInputType = 'number' | 'boolean' | 'time' | 'text';
 
 function getSettingInputType(key: string): SettingInputType {
-  if (key === 'duplex_counts_double') return 'boolean';
-  if (key === 'daily_quota' || key === 'max_stacked_registrations') return 'number';
+  if (key === 'duplex_counts_double' || key === 'allow_cross_type_stacking' || key === 'allow_employee_employee_stacking') return 'boolean';
+  if (key === 'daily_quota' || key === 'employee_daily_quota' || key === 'max_stacked_registrations') return 'number';
   if (key === 'quota_reset_time') return 'time';
   return 'text';
 }
