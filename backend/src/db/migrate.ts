@@ -110,6 +110,9 @@ async function migrate() {
     t.enu('type', ['error', 'blank']).notNullable();
     t.integer('sheets').notNullable();
     t.integer('operator_id').notNullable().references('id').inTable('system_users');
+    t.string('user_type', 20).nullable();
+    t.integer('user_id').nullable();
+    t.integer('print_operation_id').nullable().references('id').inTable('print_operations');
     t.timestamp('created_at', { useTz: true }).defaultTo(db.fn.now());
   });
 
@@ -169,6 +172,33 @@ async function migrate() {
       SET primary_user_type = 'student', primary_user_id = primary_student_id
       WHERE primary_student_id IS NOT NULL
     `);
+  }
+
+  // Add operation_type to print_operations to distinguish blank waste ops from regular prints
+  const hasPrintOperationType = await db.schema.hasColumn('print_operations', 'operation_type');
+  if (!hasPrintOperationType) {
+    await db.schema.table('print_operations', (t) => {
+      t.string('operation_type', 20).notNullable().defaultTo('print');
+    });
+  }
+
+  // Add user traceability + operation link to print_waste for blank pages
+  const hasWasteUserId = await db.schema.hasColumn('print_waste', 'user_id');
+  if (!hasWasteUserId) {
+    await db.schema.table('print_waste', (t) => {
+      t.string('user_type', 20).nullable();
+      t.integer('user_id').nullable();
+      t.integer('print_operation_id').nullable().references('id').inTable('print_operations');
+    });
+  }
+
+  // Allow audit_log to record waste adjustments: make entry_id nullable, add waste_id
+  const hasAuditWasteId = await db.schema.hasColumn('audit_log', 'waste_id');
+  if (!hasAuditWasteId) {
+    await db.raw('ALTER TABLE audit_log ALTER COLUMN entry_id DROP NOT NULL');
+    await db.schema.table('audit_log', (t) => {
+      t.integer('waste_id').nullable().references('id').inTable('print_waste');
+    });
   }
 
   logger.info('Migrations completed');

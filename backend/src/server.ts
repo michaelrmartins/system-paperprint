@@ -91,8 +91,7 @@ app.get('/health/situator', async () => {
 });
 
 app.get('/health/nasajon', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async () => {
-  const available = await nasajonClient.isAvailable();
-  return { available };
+  return nasajonClient.getHealth();
 });
 
 try {

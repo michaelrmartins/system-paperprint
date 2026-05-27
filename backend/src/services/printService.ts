@@ -218,6 +218,67 @@ export async function calculateStackedDebits(
   return debits;
 }
 
+export async function registerBlankWaste(
+  operatorId: number,
+  primaryUserId: number,
+  primaryUserType: UserType,
+  totalSheets: number,
+  stackedDebits: StackedDebit[],
+) {
+  const debitKeys = stackedDebits.map((d) => `${d.user_type}:${d.user_id}`);
+  if (new Set(debitKeys).size !== debitKeys.length) throw new Error('DUPLICATE_USER_IN_DEBITS');
+
+  return db.transaction(async (trx) => {
+    const studentIds = [...new Set(stackedDebits.filter(d => d.user_type === 'student').map(d => d.user_id))];
+    const employeeIds = [...new Set(stackedDebits.filter(d => d.user_type === 'employee').map(d => d.user_id))];
+
+    if (studentIds.length > 0) await trx('students').whereIn('id', studentIds).forUpdate();
+    if (employeeIds.length > 0) await trx('employees').whereIn('id', employeeIds).forUpdate();
+
+    for (const debit of stackedDebits) {
+      const available = await getAvailableBalanceTx(trx, debit.user_id, debit.user_type);
+      if (available < debit.sheets_to_debit) {
+        throw new Error(`INSUFFICIENT_BALANCE:${debit.identifier}`);
+      }
+    }
+
+    const [operation] = await trx('print_operations').insert({
+      operator_id: operatorId,
+      user_type: primaryUserType,
+      user_id: primaryUserId,
+      student_id: primaryUserType === 'student' ? primaryUserId : null,
+      total_sheets: totalSheets,
+      status: 'completed',
+      operation_type: 'blank_waste',
+      identify_method: 'manual',
+    }).returning('*');
+
+    for (const debit of stackedDebits) {
+      const isPrimary = debit.user_id === primaryUserId && debit.user_type === primaryUserType;
+      await trx('entries').insert({
+        print_operation_id: operation.id,
+        user_type: debit.user_type,
+        user_id: debit.user_id,
+        student_id: debit.user_type === 'student' ? debit.user_id : null,
+        sheets: debit.sheets_to_debit,
+        type: isPrimary ? 'own' : 'borrowed',
+      });
+    }
+
+    const [waste] = await trx('print_waste').insert({
+      type: 'blank',
+      sheets: totalSheets,
+      operator_id: operatorId,
+      user_type: primaryUserType,
+      user_id: primaryUserId,
+      print_operation_id: operation.id,
+    }).returning('*');
+
+    logger.info({ operation_id: operation.id, total_sheets: totalSheets, stacked: stackedDebits.length }, 'Blank waste registered');
+    return { operation, waste };
+  });
+}
+
 export async function adjustEntry(entryId: number, newSheets: number, operatorId: number, reason: string) {
   const entry = await db('entries').where('id', entryId).first();
   if (!entry) throw new Error('ENTRY_NOT_FOUND');

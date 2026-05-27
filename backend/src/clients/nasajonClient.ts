@@ -64,19 +64,37 @@ export async function getEmployeeByCode(code: string): Promise<NasajonEmployee> 
   };
 }
 
-export async function isAvailable(): Promise<boolean> {
-  const url = `${BASE_URL}/trabalhadores/000000`;
+export interface NasajonHealth {
+  reachable: boolean;
+  status: 'ok' | 'degraded' | 'down';
+  database: 'up' | 'down' | null;
+  redis: 'up' | 'down' | null;
+}
+
+export async function getHealth(): Promise<NasajonHealth> {
+  if (!BASE_URL) return { reachable: false, status: 'down', database: null, redis: null };
+  const url = `${BASE_URL}/health`;
   try {
     const res = await fetch(url, {
       method: 'GET',
       headers: { Authorization: basicAuth() },
       signal: AbortSignal.timeout(8000),
     });
-    // 404 = API reachable, employee just doesn't exist
-    if (res.status === 404 || res.ok) return true;
-    return false;
+    if (!res.ok) return { reachable: false, status: 'down', database: null, redis: null };
+    const body = await res.json() as { status?: string; database?: string; redis?: string };
+    return {
+      reachable: true,
+      status: body.status === 'ok' ? 'ok' : 'degraded',
+      database: (body.database as 'up' | 'down') ?? null,
+      redis: (body.redis as 'up' | 'down') ?? null,
+    };
   } catch {
-    logger.warn('Nasajon API unavailable');
-    return false;
+    logger.warn('Nasajon health check failed');
+    return { reachable: false, status: 'down', database: null, redis: null };
   }
+}
+
+export async function isAvailable(): Promise<boolean> {
+  const h = await getHealth();
+  return h.reachable;
 }

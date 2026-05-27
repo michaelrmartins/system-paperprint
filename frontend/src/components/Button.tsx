@@ -1,4 +1,4 @@
-import { ReactNode, ButtonHTMLAttributes } from 'react';
+import { ReactNode, ButtonHTMLAttributes, forwardRef } from 'react';
 import { Spinner } from './Spinner';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -20,21 +20,24 @@ const sizes = {
   md: 'px-4 py-2 text-[14px]',
 };
 
-export function Button({ variant = 'primary', loading, children, className = '', size = 'md', disabled, ...props }: ButtonProps) {
-  return (
-    <button
-      {...props}
-      disabled={disabled || loading}
-      className={`
-        inline-flex items-center gap-2 font-medium rounded-xl
-        transition-all duration-150 ease-out focus:outline-none
-        focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1
-        disabled:opacity-50 disabled:cursor-not-allowed
-        ${variants[variant]} ${sizes[size]} ${className}
-      `}
-    >
-      {loading && <Spinner size="sm" />}
-      {children}
-    </button>
-  );
-}
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ variant = 'primary', loading, children, className = '', size = 'md', disabled, ...props }, ref) => {
+    return (
+      <button
+        ref={ref}
+        {...props}
+        disabled={disabled || loading}
+        className={`
+          inline-flex items-center gap-2 font-medium rounded-xl
+          transition-all duration-150 ease-out focus:outline-none
+          focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-1
+          disabled:opacity-50 disabled:cursor-not-allowed
+          ${variants[variant]} ${sizes[size]} ${className}
+        `}
+      >
+        {loading && <Spinner size="sm" />}
+        {children}
+      </button>
+    );
+  }
+);

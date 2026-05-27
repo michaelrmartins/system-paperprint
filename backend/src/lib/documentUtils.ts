@@ -1,6 +1,7 @@
 export type UserType = 'student' | 'employee';
 
 export function detectUserType(doc: string): UserType {
-  // Student: exactly 10 digits starting with "20" (format: YYYY+sem+course+seq)
-  return /^\d{10}$/.test(doc) && doc.startsWith('20') ? 'student' : 'employee';
+  if (doc.startsWith('0') || doc.startsWith('1')) return 'employee';
+  if (doc.startsWith('202') || doc.length > 6) return 'student';
+  return 'employee';
 }

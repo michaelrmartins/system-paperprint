@@ -34,7 +34,7 @@ interface FaceErrData {
   employee_code?: string;
 }
 
-interface WasteEventItem { id: number; type: 'error' | 'blank'; sheets: number; operator_login: string; created_at: string; }
+interface WasteEventItem { id: number; type: 'error' | 'blank'; sheets: number; operator_login: string; created_at: string; user_name?: string; user_identifier?: string; user_type?: string; }
 interface RecentEntry { id: number; type: 'own' | 'borrowed'; sheets: number; user_id: number; user_type: string; user_name?: string; user_identifier?: string; student_id?: number }
 interface RecentOperation {
   id: number;
@@ -204,6 +204,19 @@ export function PrintFlowPage() {
   const [wasteLoading, setWasteLoading] = useState(false);
   const [wasteError, setWasteError] = useState('');
 
+  // Blank page user identification sub-flow
+  const [blankUserDoc, setBlankUserDoc] = useState('');
+  const [blankUserLoading, setBlankUserLoading] = useState(false);
+  const [blankUserError, setBlankUserError] = useState('');
+  const [blankIdentified, setBlankIdentified] = useState<IdentifyResult | null>(null);
+  const [blankLoanStudents, setBlankLoanStudents] = useState<IdentifyResult[]>([]);
+  const [blankLoanDoc, setBlankLoanDoc] = useState('');
+  const [blankLoanLoading, setBlankLoanLoading] = useState(false);
+  const [blankLoanError, setBlankLoanError] = useState('');
+  const [blankDebits, setBlankDebits] = useState<StackedDebit[] | null>(null);
+  const [blankPreviewLoading, setBlankPreviewLoading] = useState(false);
+  const [blankStackError, setBlankStackError] = useState('');
+
   // Camera state
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>(
@@ -216,6 +229,9 @@ export function PrintFlowPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
+  const advanceButtonRef = useRef<HTMLButtonElement>(null);
+  const loanRegistrationInputRef = useRef<HTMLInputElement>(null);
+  const [shouldFocusAdvance, setShouldFocusAdvance] = useState(false);
   const liveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRecognizingRef = useRef(false);
   // Always points to the freshest live handler (updated each render)
@@ -263,6 +279,27 @@ export function PrintFlowPage() {
   useSSE('print_registered', () => {
     if (step === 'identify') loadRecentOps();
   });
+
+  // "P" shortcut — open loan modal from sheets step
+  useEffect(() => {
+    if (step !== 'sheets') return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setAddingLoan(true);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [step]);
+
+  // Focus "Avançar" button after loan modal closes with sufficient balance
+  useEffect(() => {
+    if (shouldFocusAdvance && !addingLoan && step === 'sheets') {
+      advanceButtonRef.current?.focus();
+      setShouldFocusAdvance(false);
+    }
+  }, [shouldFocusAdvance, addingLoan, step]);
 
   // ── Camera utilities ──────────────────────────────────────────────────────
 
@@ -696,6 +733,7 @@ export function PrintFlowPage() {
       return true;
     }
 
+    setShouldFocusAdvance(true);
     closeLoanModal();
     return true;
   };
@@ -807,6 +845,94 @@ export function PrintFlowPage() {
     setIdentifyMethod(method);
     setIdentifyError('');
     if (method !== 'facial') stopCamera();
+  };
+
+  const resetBlankModal = () => {
+    setWasteModal(null);
+    setBlankIdentified(null);
+    setBlankUserDoc('');
+    setBlankUserError('');
+    setBlankLoanStudents([]);
+    setBlankLoanDoc('');
+    setBlankLoanError('');
+    setBlankDebits(null);
+    setBlankPreviewLoading(false);
+    setBlankStackError('');
+    setWasteSheets('');
+    setWasteError('');
+  };
+
+  const addBlankLoan = async () => {
+    const doc = blankLoanDoc.trim();
+    if (!doc || !blankIdentified) return;
+    setBlankLoanLoading(true); setBlankLoanError('');
+    try {
+      const userType = detectUserType(doc);
+      const endpoint = userType === 'student' ? '/students/identify/manual' : '/employees/identify/manual';
+      const body = userType === 'student' ? { registration_number: doc } : { employee_code: doc };
+      const res = await api.post<IdentifyResult>(endpoint, body);
+      if (res.data.user.id === blankIdentified.user.id && res.data.user_type === blankIdentified.user_type) {
+        setBlankLoanError('Este é o usuário principal.');
+        return;
+      }
+      if (blankLoanStudents.some(l => l.user.id === res.data.user.id && l.user_type === res.data.user_type)) {
+        setBlankLoanError('Este usuário já foi adicionado.');
+        return;
+      }
+      setBlankLoanStudents(prev => [...prev, res.data]);
+      setBlankLoanDoc('');
+    } catch (err) {
+      const code = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      if (code === 'STUDENT_NOT_FOUND' || code === 'EMPLOYEE_NOT_FOUND') setBlankLoanError('Usuário não encontrado.');
+      else if (code === 'STUDENT_NOT_ENROLLED') setBlankLoanError('Aluno sem matrícula ativa.');
+      else setBlankLoanError('Não foi possível identificar. Tente novamente.');
+    } finally { setBlankLoanLoading(false); }
+  };
+
+  const previewBlankDebits = async () => {
+    const n = parseInt(wasteSheets);
+    if (!n || n < 1 || !blankIdentified) return;
+    setBlankPreviewLoading(true); setBlankStackError('');
+    try {
+      const res = await api.post<{ debits: StackedDebit[] }>('/print/preview-stack', {
+        primary_user_id: blankIdentified.user.id,
+        primary_user_type: blankIdentified.user_type,
+        total_sheets: n,
+        extra_users: blankLoanStudents.map(l => ({ user_id: l.user.id, user_type: l.user_type })),
+      });
+      setBlankDebits(res.data.debits);
+    } catch (err) {
+      const code = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      if (code === 'INSUFFICIENT_TOTAL_BALANCE') {
+        setBlankStackError('Saldo insuficiente mesmo com os emprestadores. Adicione mais matrículas.');
+      } else {
+        setBlankStackError('Erro ao verificar saldo. Tente novamente.');
+      }
+    } finally { setBlankPreviewLoading(false); }
+  };
+
+  const confirmBlankWaste = async () => {
+    if (!blankIdentified || !blankDebits) return;
+    const n = parseInt(wasteSheets);
+    setWasteLoading(true); setWasteError('');
+    try {
+      await api.post('/waste', {
+        type: 'blank',
+        sheets: n,
+        user_id: blankIdentified.user.id,
+        user_type: blankIdentified.user_type,
+        stacked_debits: blankDebits,
+      });
+      resetBlankModal(); loadRecentOps();
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? '';
+      if (msg.startsWith('INSUFFICIENT_BALANCE')) {
+        setWasteError('Saldo insuficiente. Volte e revise os emprestadores.');
+        setBlankDebits(null);
+      } else {
+        setWasteError('Não foi possível registrar. Tente novamente.');
+      }
+    } finally { setWasteLoading(false); }
   };
 
   const openRecentDetail = async (op: RecentOperation) => {
@@ -1002,7 +1128,7 @@ export function PrintFlowPage() {
             Erro de impressão
           </button>
           <button
-            onClick={() => { setWasteSheets(''); setWasteError(''); setWasteModal('blank'); }}
+            onClick={() => { resetBlankModal(); setWasteModal('blank'); }}
             className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass-sm text-[13px] font-medium text-gray-600 hover:bg-gray-50/70 transition-colors"
           >
             <FileX size={14} />
@@ -1072,7 +1198,7 @@ export function PrintFlowPage() {
               {todayWaste.events.length > 0 && (
                 <>
                   <div className={`px-4 py-2 bg-gray-50/40 ${recentOps.length > 0 ? 'border-t border-gray-100/60' : ''}`}>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Desperdício</p>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Erros e folhas em branco</p>
                   </div>
                   {todayWaste.events.map((e) => (
                     <div key={`waste-${e.id}`} className="flex items-center gap-3 px-4 py-2.5">
@@ -1081,9 +1207,13 @@ export function PrintFlowPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-[13px] font-semibold text-gray-700">
-                          {e.type === 'error' ? 'Erro de impressão' : 'Folhas em branco'}
+                          {e.type === 'error' ? 'Erro de impressão' : (e.user_name ? shortName(e.user_name) : 'Folhas em branco')}
                         </p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">{e.operator_login}</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          {e.type === 'blank' && e.user_identifier ? `${e.user_identifier} · ` : ''}
+                          {e.operator_login}
+                          {e.type === 'blank' && e.user_type === 'employee' ? ' · Func.' : ''}
+                        </p>
                       </div>
                       <div className="flex flex-col items-end gap-0.5 shrink-0">
                         <span className="text-[13px] font-bold text-gray-500">{e.sheets}</span>
@@ -1166,6 +1296,7 @@ export function PrintFlowPage() {
               className="mt-3 flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-700 transition-colors"
             >
               <Plus size={14} />
+              <span className="font-mono text-[11px] text-gray-300 leading-none">(p)</span>
               Adicionar matrícula emprestadora
             </button>
 
@@ -1174,6 +1305,7 @@ export function PrintFlowPage() {
             <div className="flex gap-2 mt-5">
               <Button variant="secondary" onClick={reset} size="sm">Cancelar</Button>
               <Button
+                ref={advanceButtonRef}
                 onClick={handleSheetsNext}
                 loading={previewLoading}
                 disabled={!sheets || parseInt(sheets) <= 0}
@@ -1296,6 +1428,7 @@ export function PrintFlowPage() {
         {loanIdentifyMethod === 'manual' && (
           <>
             <Input
+              ref={loanRegistrationInputRef}
               label="Matrícula do emprestador"
               value={loanRegistration}
               onChange={(e) => { setLoanAddedMsg(''); setLoanRegistration(onlyNumbers(e.target.value)); }}
@@ -1385,24 +1518,34 @@ export function PrintFlowPage() {
       </Modal>
 
       {/* ── Error modal ── */}
-      <Modal open={!!errorModal} onClose={() => setErrorModal('')} title="Atenção">
+      <Modal open={!!errorModal} onClose={() => {
+        setErrorModal('');
+        if (addingLoan && loanIdentifyMethod === 'manual') {
+          setLoanRegistration('');
+          setTimeout(() => loanRegistrationInputRef.current?.focus(), 50);
+        }
+      }} title="Atenção">
         <p className="text-[14px] text-gray-700">{errorModal}</p>
-        <Button onClick={() => setErrorModal('')} className="mt-4 w-full justify-center" size="sm">
+        <Button onClick={() => {
+          setErrorModal('');
+          if (addingLoan && loanIdentifyMethod === 'manual') {
+            setLoanRegistration('');
+            setTimeout(() => loanRegistrationInputRef.current?.focus(), 50);
+          }
+        }} className="mt-4 w-full justify-center" size="sm" autoFocus>
           Fechar
         </Button>
       </Modal>
 
-      {/* ── Waste registration modal ── */}
+      {/* ── Error waste modal ── */}
       <Modal
-        open={!!wasteModal}
+        open={wasteModal === 'error'}
         onClose={() => setWasteModal(null)}
-        title={wasteModal === 'error' ? 'Registrar Erro de Impressão' : 'Registrar Folhas em Branco'}
+        title="Registrar Erro de Impressão"
         size="sm"
       >
         <p className="text-[13px] text-gray-500 mb-4">
-          {wasteModal === 'error'
-            ? 'Registre folhas perdidas por falha, atolamento ou descarte durante a impressão. Essas folhas não são debitadas de nenhuma cota.'
-            : 'Registre folhas em branco que não foram utilizadas para impressão de nenhum conteúdo.'}
+          Registre folhas perdidas por falha, atolamento ou descarte durante a impressão. Essas folhas não são debitadas de nenhuma cota.
         </p>
         <Input
           label="Número de folhas"
@@ -1417,8 +1560,8 @@ export function PrintFlowPage() {
               if (!n || n < 1) { setWasteError('Informe um número válido.'); return; }
               setWasteLoading(true); setWasteError('');
               try {
-                await api.post('/waste', { type: wasteModal, sheets: n });
-                setWasteModal(null);
+                await api.post('/waste', { type: 'error', sheets: n });
+                setWasteModal(null); loadRecentOps();
               } catch { setWasteError('Não foi possível registrar. Tente novamente.'); }
               finally { setWasteLoading(false); }
             }
@@ -1437,8 +1580,8 @@ export function PrintFlowPage() {
               if (!n || n < 1) { setWasteError('Informe um número válido.'); return; }
               setWasteLoading(true); setWasteError('');
               try {
-                await api.post('/waste', { type: wasteModal, sheets: n });
-                setWasteModal(null);
+                await api.post('/waste', { type: 'error', sheets: n });
+                setWasteModal(null); loadRecentOps();
               } catch { setWasteError('Não foi possível registrar. Tente novamente.'); }
               finally { setWasteLoading(false); }
             }}
@@ -1446,6 +1589,222 @@ export function PrintFlowPage() {
             Registrar
           </Button>
         </div>
+      </Modal>
+
+      {/* ── Blank page modal — 3 steps: identify → sheets+loans → confirm ── */}
+      <Modal
+        open={wasteModal === 'blank'}
+        onClose={resetBlankModal}
+        title="Registrar Folhas em Branco"
+        size="sm"
+      >
+        {/* Step 1: Identify user */}
+        {!blankIdentified && (
+          <>
+            <p className="text-[13px] text-gray-500 mb-4">
+              Folhas em branco debitam a cota do solicitante. Informe a matrícula ou código do funcionário.
+            </p>
+            <Input
+              label="Matrícula / Código"
+              type="text"
+              value={blankUserDoc}
+              onChange={(e) => setBlankUserDoc(onlyNumbers(e.target.value))}
+              onKeyDown={async (e) => {
+                if (e.key !== 'Enter') return;
+                const doc = blankUserDoc.trim();
+                if (!doc) { setBlankUserError('Informe a matrícula ou código.'); return; }
+                setBlankUserLoading(true); setBlankUserError('');
+                try {
+                  const userType = detectUserType(doc);
+                  const res = await api.post<IdentifyResult>(
+                    userType === 'student' ? '/students/identify/manual' : '/employees/identify/manual',
+                    userType === 'student' ? { registration_number: doc } : { employee_code: doc },
+                  );
+                  setBlankIdentified(res.data);
+                } catch (err) {
+                  const code = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+                  if (code === 'STUDENT_NOT_FOUND' || code === 'EMPLOYEE_NOT_FOUND') setBlankUserError('Usuário não encontrado.');
+                  else if (code === 'STUDENT_NOT_ENROLLED') setBlankUserError('Aluno sem matrícula ativa.');
+                  else setBlankUserError('Não foi possível identificar. Tente novamente.');
+                } finally { setBlankUserLoading(false); }
+              }}
+              autoFocus
+            />
+            {blankUserError && <p className="text-[13px] text-red-500 mt-2">{blankUserError}</p>}
+            <div className="flex gap-2 mt-4">
+              <Button variant="secondary" size="sm" onClick={resetBlankModal}>Cancelar</Button>
+              <Button
+                size="sm"
+                className="flex-1 justify-center"
+                loading={blankUserLoading}
+                onClick={async () => {
+                  const doc = blankUserDoc.trim();
+                  if (!doc) { setBlankUserError('Informe a matrícula ou código.'); return; }
+                  setBlankUserLoading(true); setBlankUserError('');
+                  try {
+                    const userType = detectUserType(doc);
+                    const res = await api.post<IdentifyResult>(
+                      userType === 'student' ? '/students/identify/manual' : '/employees/identify/manual',
+                      userType === 'student' ? { registration_number: doc } : { employee_code: doc },
+                    );
+                    setBlankIdentified(res.data);
+                  } catch (err) {
+                    const code = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+                    if (code === 'STUDENT_NOT_FOUND' || code === 'EMPLOYEE_NOT_FOUND') setBlankUserError('Usuário não encontrado.');
+                    else if (code === 'STUDENT_NOT_ENROLLED') setBlankUserError('Aluno sem matrícula ativa.');
+                    else setBlankUserError('Não foi possível identificar. Tente novamente.');
+                  } finally { setBlankUserLoading(false); }
+                }}
+              >
+                Identificar
+              </Button>
+            </div>
+          </>
+        )}
+
+        {/* Step 2: Enter sheets + optional loan students */}
+        {blankIdentified && !blankDebits && (() => {
+          const needed = parseInt(wasteSheets) || 0;
+          const totalAvail = blankIdentified.available_balance + blankLoanStudents.reduce((s, l) => s + l.available_balance, 0);
+          const shortage = needed > 0 ? Math.max(0, needed - totalAvail) : 0;
+          return (
+            <>
+              {/* Primary user card */}
+              <div className="flex items-center gap-3 p-3 mb-3 rounded-2xl bg-gray-50/80 border border-gray-100">
+                {blankIdentified.photo ? (
+                  <img src={`data:image/jpeg;base64,${blankIdentified.photo}`} alt={blankIdentified.user.name}
+                    className="w-10 h-10 rounded-xl object-cover border border-white/60 shadow-sm shrink-0" />
+                ) : (
+                  <div className="w-10 h-10 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-base font-semibold shrink-0">
+                    {blankIdentified.user.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-semibold text-gray-900 truncate">{blankIdentified.user.name}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">{getUserIdentifier(blankIdentified.user, blankIdentified.user_type)}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[11px] text-gray-400">Saldo</p>
+                  <p className={`text-[13px] font-bold ${blankIdentified.available_balance === 0 ? 'text-red-500' : 'text-gray-900'}`}>
+                    {blankIdentified.available_balance} fls
+                  </p>
+                </div>
+                <button onClick={() => { setBlankIdentified(null); setBlankLoanStudents([]); setBlankLoanDoc(''); setBlankLoanError(''); setBlankStackError(''); }}
+                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors shrink-0" title="Trocar usuário">
+                  <RefreshCw size={13} />
+                </button>
+              </div>
+
+              <Input
+                label="Folhas em branco"
+                type="number" min="1" step="1"
+                value={wasteSheets}
+                onChange={(e) => { setWasteSheets(e.target.value.replace(/[^0-9]/g, '')); setBlankStackError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && parseInt(wasteSheets) > 0) previewBlankDebits(); }}
+                autoFocus
+              />
+
+              {/* Balance feedback */}
+              {needed > 0 && shortage === 0 && (
+                <p className="mt-2 text-[13px] text-emerald-600 font-medium">Saldo suficiente para esta operação.</p>
+              )}
+              {needed > 0 && shortage > 0 && (
+                <p className="mt-2 text-[13px] text-amber-600">
+                  Faltam <strong>{shortage}</strong> folha{shortage !== 1 ? 's' : ''} — adicione matrículas emprestadoras.
+                </p>
+              )}
+
+              {/* Loan students list */}
+              {blankLoanStudents.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Emprestadores</p>
+                  {blankLoanStudents.map((l, i) => (
+                    <div key={`${l.user_type}-${l.user.id}`} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-medium text-gray-800 truncate">{shortName(l.user.name)}</p>
+                        <p className="text-[11px] text-gray-400">{getUserIdentifier(l.user, l.user_type)} · {l.available_balance} fls</p>
+                      </div>
+                      <button onClick={() => setBlankLoanStudents(prev => prev.filter((_, j) => j !== i))}
+                        className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add loan student input */}
+              <div className="mt-3 flex gap-2 items-end">
+                <div className="flex-1">
+                  <Input
+                    label="Matrícula emprestadora"
+                    type="text"
+                    value={blankLoanDoc}
+                    onChange={(e) => { setBlankLoanDoc(onlyNumbers(e.target.value)); setBlankLoanError(''); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addBlankLoan(); }}
+                  />
+                </div>
+                <Button size="sm" variant="secondary" loading={blankLoanLoading} onClick={addBlankLoan}
+                  className="mb-0 shrink-0" disabled={!blankLoanDoc.trim()}>
+                  <Plus size={14} />
+                </Button>
+              </div>
+              {blankLoanError && <p className="text-[12px] text-red-500 mt-1">{blankLoanError}</p>}
+
+              {blankStackError && <p className="mt-2 text-[13px] text-red-500">{blankStackError}</p>}
+
+              <div className="flex gap-2 mt-4">
+                <Button variant="secondary" size="sm" onClick={resetBlankModal}>Cancelar</Button>
+                <Button
+                  size="sm" className="flex-1 justify-center"
+                  loading={blankPreviewLoading}
+                  disabled={!wasteSheets || parseInt(wasteSheets) < 1}
+                  onClick={previewBlankDebits}
+                >
+                  Verificar <ChevronRight size={14} />
+                </Button>
+              </div>
+            </>
+          );
+        })()}
+
+        {/* Step 3: Debit breakdown + confirm */}
+        {blankIdentified && blankDebits && (
+          <>
+            <div className="space-y-2 mb-4 p-3 rounded-2xl bg-gray-50/80 border border-gray-100">
+              <div className="flex justify-between text-[13px]">
+                <span className="text-gray-500">Total de folhas</span>
+                <span className="font-bold text-gray-900">{wasteSheets}</span>
+              </div>
+              {blankDebits.length > 1 && (
+                <div className="pt-2 border-t border-gray-100 space-y-1">
+                  <p className="text-[11px] text-gray-400 uppercase tracking-wide">Distribuição</p>
+                  {blankDebits.map((d) => (
+                    <div key={`${d.user_type}:${d.user_id}`} className="flex justify-between text-[12px]">
+                      <span className="text-gray-600">{shortName(d.name)} ({d.identifier}){d.user_type === 'employee' ? ' · Func.' : ''}</span>
+                      <span className="font-medium text-gray-800">{d.sheets_to_debit} fls</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {blankDebits.length === 1 && (
+                <div className="flex justify-between text-[13px]">
+                  <span className="text-gray-500">{blankIdentified.user_type === 'employee' ? 'Funcionário' : 'Aluno'}</span>
+                  <span className="font-medium text-gray-900">{shortName(blankIdentified.user.name)}</span>
+                </div>
+              )}
+            </div>
+
+            {wasteError && <p className="text-[13px] text-red-500 mb-3">{wasteError}</p>}
+
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => { setBlankDebits(null); setWasteError(''); }}>Voltar</Button>
+              <Button size="sm" className="flex-1 justify-center" loading={wasteLoading} onClick={confirmBlankWaste}>
+                Registrar folhas em branco
+              </Button>
+            </div>
+          </>
+        )}
       </Modal>
 
       {/* ── Recent operation detail modal ── */}

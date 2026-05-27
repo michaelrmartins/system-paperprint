@@ -131,6 +131,9 @@ export async function printRoutes(app: FastifyInstance) {
       })
       .join('system_users', 'print_operations.operator_id', 'system_users.id')
       .whereRaw("print_operations.created_at >= CURRENT_DATE")
+      .where(function () {
+        this.whereNull('print_operations.operation_type').orWhere('print_operations.operation_type', 'print');
+      })
       .select(
         'print_operations.*',
         db.raw("COALESCE(students.name, employees.name) as user_name"),

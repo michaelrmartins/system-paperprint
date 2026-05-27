@@ -131,6 +131,10 @@ export function ReportsPage() {
   // Waste tab
   const [wasteSummary, setWasteSummary] = useState<WasteSummary | null>(null);
 
+  // Invalid docs pagination
+  const [invDocsPage, setInvDocsPage] = useState(1);
+  const INV_DOCS_PAGE_SIZE = 10;
+
   // History tab
   const [histReg, setHistReg]           = useState('');
   const [histStudentId, setHistStudentId] = useState<number | null>(null);
@@ -180,6 +184,7 @@ export function ReportsPage() {
     setLoadError('');
     setExpandedPeriods(new Set());
     setPeriodStudents({});
+    setInvDocsPage(1);
     if (tab !== 'history') load();
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -248,7 +253,7 @@ export function ReportsPage() {
     { key: 'operator',        label: 'Por Operador' },
     { key: 'loan-type',       label: 'Próprias vs Emp.' },
     { key: 'identify-method', label: 'Identificação' },
-    { key: 'waste',           label: 'Desperdício' },
+    { key: 'waste',           label: 'Erros e Folhas em Branco' },
     { key: 'history',         label: 'Histórico' },
     { key: 'audit',           label: 'Auditoria' },
     { key: 'invalid-docs',    label: 'Docs. Inválidos' },
@@ -698,6 +703,8 @@ export function ReportsPage() {
       {/* ── Invalid Documents ── */}
       {!loading && tab === 'invalid-docs' && data.length > 0 && (() => {
         const rows = data as InvalidDocRow[];
+        const totalPages = Math.ceil(rows.length / INV_DOCS_PAGE_SIZE);
+        const pageRows = rows.slice((invDocsPage - 1) * INV_DOCS_PAGE_SIZE, invDocsPage * INV_DOCS_PAGE_SIZE);
         const CONTEXT_LABEL: Record<string, string> = { primary: 'Solicitante', loan: 'Emprestador' };
         const METHOD_LBL: Record<string, string> = { manual: 'Manual', rfid: 'Cartão', facial: 'Facial' };
         const fmt = (iso: string) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -708,7 +715,7 @@ export function ReportsPage() {
                 <tr><Th>Doc. inválido</Th><Th>Situação</Th><Th>Papel</Th><Th>Solicitante</Th><Th>Método</Th><Th>Operador</Th><Th right>Data/Hora</Th></tr>
               </thead>
               <tbody className="divide-y divide-gray-100/80">
-                {rows.map(r => (
+                {pageRows.map(r => (
                   <tr key={r.id} className="hover:bg-gray-50/40">
                     <td className="px-5 py-3 font-mono font-medium text-gray-900">{r.document}</td>
                     <td className="px-5 py-3">
@@ -737,8 +744,29 @@ export function ReportsPage() {
               </tbody>
               <tfoot className="border-t border-gray-200 bg-gray-50/60">
                 <tr>
-                  <td colSpan={7} className="px-5 py-3 text-[12px] text-gray-500">
+                  <td colSpan={4} className="px-5 py-3 text-[12px] text-gray-500">
                     {rows.length} tentativa{rows.length !== 1 ? 's' : ''} bloqueada{rows.length !== 1 ? 's' : ''}
+                  </td>
+                  <td colSpan={3} className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="text-[12px] text-gray-400">
+                        {(invDocsPage - 1) * INV_DOCS_PAGE_SIZE + 1}–{Math.min(invDocsPage * INV_DOCS_PAGE_SIZE, rows.length)} de {rows.length}
+                      </span>
+                      <button
+                        onClick={() => setInvDocsPage(p => Math.max(1, p - 1))}
+                        disabled={invDocsPage === 1}
+                        className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronRight size={14} className="rotate-180" />
+                      </button>
+                      <button
+                        onClick={() => setInvDocsPage(p => Math.min(totalPages, p + 1))}
+                        disabled={invDocsPage === totalPages}
+                        className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tfoot>
@@ -780,7 +808,7 @@ export function ReportsPage() {
         );
       })()}
 
-      {/* ── Waste (errors & blank pages) ── */}
+      {/* ── Errors and blank pages ── */}
       {!loading && tab === 'waste' && wasteSummary && (() => {
         const total = wasteSummary.error_sheets + wasteSummary.blank_sheets;
         const pieData = [
@@ -878,7 +906,7 @@ export function ReportsPage() {
             )}
 
             {wasteSummary.events.length === 0 && (
-              <p className="text-center text-[14px] text-gray-400 py-12">Sem registros de desperdício para o período.</p>
+              <p className="text-center text-[14px] text-gray-400 py-12">Sem erros de impressão ou folhas em branco registrados para o período.</p>
             )}
           </div>
         );

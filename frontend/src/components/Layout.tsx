@@ -39,6 +39,66 @@ function LyceumStatus() {
   );
 }
 
+interface NasajonHealth {
+  reachable: boolean;
+  status: 'ok' | 'degraded' | 'down';
+  database: 'up' | 'down' | null;
+  redis: 'up' | 'down' | null;
+}
+
+function NasajonStatus() {
+  const [health, setHealth] = useState<NasajonHealth | null>(null);
+
+  const check = useCallback(async () => {
+    try {
+      const res = await api.get<NasajonHealth>('/health/nasajon');
+      setHealth(res.data);
+    } catch {
+      setHealth({ reachable: false, status: 'down', database: null, redis: null });
+    }
+  }, []);
+
+  useEffect(() => {
+    check();
+    const id = setInterval(check, 30_000);
+    return () => clearInterval(id);
+  }, [check]);
+
+  if (health === null) return null;
+
+  const dotColor =
+    health.status === 'ok' ? 'bg-emerald-500' :
+    health.status === 'degraded' ? 'bg-amber-400' :
+    'bg-red-400';
+
+  const labelColor =
+    health.status === 'ok' ? 'text-gray-400' :
+    health.status === 'degraded' ? 'text-amber-600' :
+    'text-red-500';
+
+  const downServices = [
+    health.database === 'down' && 'database',
+    health.redis === 'down' && 'redis',
+  ].filter(Boolean).join(', ');
+
+  const tooltip =
+    health.status === 'ok' ? 'Nasajon disponível' :
+    health.status === 'degraded' ? `Nasajon degradado — ${downServices} indisponível` :
+    'Nasajon indisponível';
+
+  return (
+    <div
+      className="flex items-center gap-2 px-3 py-2 rounded-xl cursor-default"
+      title={tooltip}
+    >
+      <span className={`shrink-0 w-2 h-2 rounded-full ${dotColor}`} />
+      <span className={`text-[11px] font-medium ${labelColor}`}>
+        Nasajon{health.status === 'degraded' && downServices ? ` (${downServices})` : ''}
+      </span>
+    </div>
+  );
+}
+
 interface NavItem {
   to: string;
   icon: ReactNode;
@@ -122,6 +182,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </ul>
             <PrinterWidget />
             <LyceumStatus />
+            <NasajonStatus />
           </div>
         </nav>
 
