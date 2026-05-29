@@ -58,7 +58,7 @@ export async function findOrCreateStudent(
     const [inserted] = await db('students')
       .insert({
         registration_number: registrationNumber,
-        name: lyceumData?.nome_compl || registrationNumber,
+        name: lyceumData?.nome_social || lyceumData?.nome_compl || registrationNumber,
         course: lyceumData?.nome_curso || '',
         period: lyceumData?.nome_serie || '',
         person_code: lyceumData?.pessoa || null,
@@ -72,7 +72,7 @@ export async function findOrCreateStudent(
     const [updated] = await db('students')
       .where('id', student.id)
       .update({
-        name: lyceumData.nome_compl,
+        name: lyceumData.nome_social || lyceumData.nome_compl,
         course: lyceumData.nome_curso,
         period: lyceumData.nome_serie,
         person_code: lyceumData.pessoa,

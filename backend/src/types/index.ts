@@ -106,6 +106,7 @@ export interface JwtPayload {
 export interface LyceumStudent {
   aluno: string;
   nome_compl: string;
+  nome_social: string | null;
   nome_curso: string;
   nome_serie: string;
   pessoa: string;

@@ -15,7 +15,7 @@ async function syncPendingStudents() {
     try {
       const data = await lyceumClient.getStudentByRegistration(student.registration_number);
       await db('students').where('id', student.id).update({
-        name: data.nome_compl,
+        name: data.nome_social || data.nome_compl,
         course: data.nome_curso,
         period: data.nome_serie,
         person_code: data.pessoa,
