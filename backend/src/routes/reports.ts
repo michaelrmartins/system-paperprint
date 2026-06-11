@@ -39,33 +39,32 @@ export async function reportRoutes(app: FastifyInstance) {
       .orderBy('total_sheets', 'desc');
   });
 
-  // Top users by consumption — dual JOIN, includes both students and employees
+  // Top users by consumption — groups by primary requestor, not quota debited
   app.get('/reports/top-students', { preHandler: requireAuth(['operator', 'auditor', 'admin']) }, async (req) => {
     const { start, end, limit = '20' } = req.query as { start?: string; end?: string; limit?: string };
-    return db('entries')
-      .join('print_operations', 'entries.print_operation_id', 'print_operations.id')
+    return db('print_operations')
       .leftJoin('students', function () {
-        this.on('entries.user_type', db.raw("'student'")).andOn('entries.user_id', 'students.id');
+        this.on('print_operations.user_type', db.raw("'student'")).andOn('print_operations.user_id', 'students.id');
       })
       .leftJoin('employees', function () {
-        this.on('entries.user_type', db.raw("'employee'")).andOn('entries.user_id', 'employees.id');
+        this.on('print_operations.user_type', db.raw("'employee'")).andOn('print_operations.user_id', 'employees.id');
       })
       .modify((q) => {
         if (start) q.where('print_operations.created_at', '>=', start);
-        if (end) q.where('print_operations.created_at', '<=', end);
+        if (end) q.where('print_operations.created_at', '<=', `${end}T23:59:59`);
       })
       .groupBy(
-        'entries.user_type', 'entries.user_id',
+        'print_operations.user_type', 'print_operations.user_id',
         'students.id', 'students.name', 'students.registration_number', 'students.course', 'students.period',
         'employees.id', 'employees.name', 'employees.employee_code', 'employees.department',
       )
       .select(
-        'entries.user_type',
+        'print_operations.user_type',
         db.raw("COALESCE(students.id, employees.id) as id"),
         db.raw("COALESCE(students.name, employees.name) as name"),
         db.raw("COALESCE(students.registration_number, employees.employee_code) as identifier"),
         db.raw("COALESCE(students.course, employees.department, '') as detail"),
-        db.raw('SUM(entries.sheets) as total_sheets')
+        db.raw('SUM(print_operations.total_sheets) as total_sheets'),
       )
       .orderBy('total_sheets', 'desc')
       .limit(parseInt(limit));

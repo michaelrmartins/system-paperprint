@@ -51,4 +51,38 @@ export async function authRoutes(app: FastifyInstance) {
     const user = await db('system_users').where('id', payload.sub).first();
     return { id: user.id, login: user.login, role: user.role };
   });
+
+  app.post('/auth/change-password', { preHandler: requireAuth() }, async (req, reply) => {
+    const payload = req.user as JwtPayload;
+    const { current_password, new_password } = req.body as { current_password: string; new_password: string };
+
+    const user = await db('system_users').where('id', payload.sub).first();
+    const valid = await argon2.verify(user.password_hash, current_password);
+    if (!valid) {
+      return reply.status(401).send({ error: 'WRONG_PASSWORD' });
+    }
+
+    if (!new_password || new_password.length < 8) {
+      return reply.status(400).send({ error: 'PASSWORD_TOO_SHORT' });
+    }
+
+    const newHash = await argon2.hash(new_password);
+    await db('system_users').where('id', payload.sub).update({ password_hash: newHash });
+    return { success: true };
+  });
+
+  app.get('/auth/preferences', { preHandler: requireAuth() }, async (req) => {
+    const payload = req.user as JwtPayload;
+    const user = await db('system_users').where('id', payload.sub).first();
+    return user?.preferences ?? {};
+  });
+
+  app.put('/auth/preferences', { preHandler: requireAuth() }, async (req) => {
+    const payload = req.user as JwtPayload;
+    const body = req.body as Record<string, unknown>;
+    await db('system_users').where('id', payload.sub).update({
+      preferences: db.raw('preferences || ?', [JSON.stringify(body)]),
+    });
+    return { success: true };
+  });
 }

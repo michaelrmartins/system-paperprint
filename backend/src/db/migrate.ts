@@ -201,6 +201,14 @@ async function migrate() {
     });
   }
 
+  // Add preferences JSONB column to system_users for storing user preferences (e.g. theme)
+  const hasPreferences = await db.schema.hasColumn('system_users', 'preferences');
+  if (!hasPreferences) {
+    await db.schema.table('system_users', (t) => {
+      t.jsonb('preferences').notNullable().defaultTo('{}');
+    });
+  }
+
   logger.info('Migrations completed');
 }
 

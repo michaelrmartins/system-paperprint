@@ -30,6 +30,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_INPUT: 'Dados inválidos. Verifique os campos.',
   USER_NOT_FOUND: 'Usuário não encontrado.',
   NOTHING_TO_UPDATE: 'Nenhuma alteração para salvar.',
+  WRONG_PASSWORD: 'Senha atual incorreta.',
+  PASSWORD_TOO_SHORT: 'A nova senha deve ter pelo menos 8 caracteres.',
 };
 
 export function getErrorMessage(errorCode: string): string {

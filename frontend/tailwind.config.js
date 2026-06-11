@@ -1,6 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       fontFamily: {
@@ -19,6 +20,8 @@ export default {
       boxShadow: {
         glass: '0 8px 32px rgba(0,0,0,0.08), 0 1.5px 4px rgba(0,0,0,0.04)',
         'glass-sm': '0 2px 12px rgba(0,0,0,0.06)',
+        'glass-dark': '0 8px 32px rgba(0,0,0,0.4), 0 1.5px 4px rgba(0,0,0,0.2)',
+        'glass-sm-dark': '0 2px 12px rgba(0,0,0,0.3)',
       },
       keyframes: {
         fadeIn: { from: { opacity: '0', transform: 'translateY(6px)' }, to: { opacity: '1', transform: 'translateY(0)' } },

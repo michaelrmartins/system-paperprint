@@ -29,15 +29,15 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-100 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
       <div className="w-full max-w-sm animate-slideUp">
-        <div className="bg-white/80 backdrop-blur-xl border border-white/60 rounded-3xl shadow-glass p-8">
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-12 h-12 rounded-2xl bg-gray-900 flex items-center justify-center mb-4 shadow-sm">
-              <Printer size={22} className="text-white" />
+        <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-3xl shadow-glass dark:shadow-glass-dark p-9">
+          <div className="flex flex-col items-center mb-9">
+            <div className="w-14 h-14 rounded-2xl bg-gray-900 dark:bg-white flex items-center justify-center mb-4 shadow-sm">
+              <Printer size={26} className="text-white dark:text-gray-900" />
             </div>
-            <h1 className="text-[20px] font-bold text-gray-900 tracking-tight">Paperprint</h1>
-            <p className="text-[13px] text-gray-400 mt-1">Controle de impressões</p>
+            <h1 className="text-[22px] font-bold text-gray-900 dark:text-white tracking-tight">Paperprint</h1>
+            <p className="text-[14px] text-gray-400 dark:text-gray-500 mt-1">Controle de impressões</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -59,7 +59,7 @@ export function LoginPage() {
             />
 
             {error && (
-              <p className="text-[13px] text-red-500 text-center animate-fadeIn">{error}</p>
+              <p className="text-[14px] text-red-500 text-center animate-fadeIn">{error}</p>
             )}
 
             <Button

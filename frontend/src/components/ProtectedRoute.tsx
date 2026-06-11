@@ -13,7 +13,7 @@ export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
         <Spinner size="lg" className="text-gray-400" />
       </div>
     );

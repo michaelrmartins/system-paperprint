@@ -77,9 +77,9 @@ interface FullHistory { as_primary: PrimaryOperation[]; as_lender: LoanEntry[] }
 const METHOD_ICONS = { manual: Keyboard, rfid: CreditCard, facial: Camera } as const;
 
 const METHOD_BADGE_CLASS: Record<string, string> = {
-  manual: 'bg-gray-100 text-gray-500',
-  rfid:   'bg-blue-50 text-blue-600',
-  facial: 'bg-purple-50 text-purple-600',
+  manual: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400',
+  rfid:   'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400',
+  facial: 'bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400',
 };
 
 function formatModalTime(iso: string): string {
@@ -128,7 +128,7 @@ function CameraControls({ cameras, selectedCameraId, onSelect, onCycle, error }:
           <select
             value={selectedCameraId}
             onChange={(e) => onSelect(e.target.value)}
-            className="flex-1 px-3 py-1.5 text-[12px] border border-gray-200 rounded-lg outline-none focus:border-gray-400 bg-white/70"
+            className="flex-1 px-3 py-1.5 text-[13px] border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:border-gray-400 dark:focus:border-gray-500 bg-white/70 dark:bg-gray-900/70 text-gray-900 dark:text-white"
           >
             {cameras.map((c, i) => (
               <option key={c.deviceId} value={c.deviceId}>
@@ -137,20 +137,20 @@ function CameraControls({ cameras, selectedCameraId, onSelect, onCycle, error }:
             ))}
           </select>
         ) : cameras.length === 1 ? (
-          <span className="flex-1 text-[12px] text-gray-500 truncate px-1">
+          <span className="flex-1 text-[13px] text-gray-500 dark:text-gray-400 truncate px-1">
             {cameras[0].label || 'Câmera 1'}
           </span>
         ) : null}
         <button
           type="button"
           onClick={onCycle}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors flex-shrink-0"
+          className="p-1.5 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex-shrink-0"
           title={cameras.length > 1 ? 'Trocar câmera' : 'Reiniciar câmera'}
         >
-          <RefreshCw size={13} />
+          <RefreshCw size={15} />
         </button>
       </div>
-      {error && <p className="text-[12px] text-red-500">{error}</p>}
+      {error && <p className="text-[13px] text-red-500">{error}</p>}
     </div>
   );
 }
@@ -988,23 +988,23 @@ export function PrintFlowPage() {
     <div className="max-w-lg mx-auto space-y-4">
       {/* ── Step: Identify ── */}
       {step === 'identify' && (
-        <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-6 animate-slideUp">
-          <h2 className="text-[16px] font-semibold text-gray-900 mb-5">Identificar Usuário</h2>
+        <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-2xl shadow-glass dark:shadow-glass-dark p-6 animate-slideUp">
+          <h2 className="text-[17px] font-semibold text-gray-900 dark:text-white mb-5">Identificar Usuário</h2>
 
           {/* Method tabs */}
-          <div className="flex gap-1 p-1 bg-gray-100/80 rounded-xl mb-5">
+          <div className="flex gap-1 p-1 bg-gray-100/80 dark:bg-gray-800/60 rounded-xl mb-5">
             {([
-              { key: 'manual', icon: <Keyboard size={14} />, label: 'Matrícula' },
-              { key: 'rfid',   icon: <CreditCard size={14} />, label: 'Carteirinha' },
-              { key: 'facial', icon: <Camera size={14} />, label: 'Facial' },
+              { key: 'manual', icon: <Keyboard size={16} />, label: 'Matrícula' },
+              { key: 'rfid',   icon: <CreditCard size={16} />, label: 'Carteirinha' },
+              { key: 'facial', icon: <Camera size={16} />, label: 'Facial' },
             ] as const).map((m) => (
               <button
                 key={m.key}
                 onClick={() => switchMethod(m.key)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-medium transition-all duration-150 ${
                   identifyMethod === m.key
-                    ? 'bg-white shadow-sm text-gray-900'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }`}
               >
                 {m.icon}
@@ -1031,15 +1031,15 @@ export function PrintFlowPage() {
                       pattern="[0-9]*"
                     />
                     {detectedType === 'employee' && (
-                      <span className="absolute right-3 top-8 flex items-center gap-1 text-[11px] text-blue-500 font-medium pointer-events-none">
-                        <Briefcase size={11} /> Funcionário
+                      <span className="absolute right-3 top-8 flex items-center gap-1 text-[12px] text-blue-500 font-medium pointer-events-none">
+                        <Briefcase size={12} /> Funcionário
                       </span>
                     )}
                   </div>
                 );
               })()}
               <Button onClick={() => identifyByManual()} loading={identifying} className="w-full justify-center">
-                Identificar <ChevronRight size={15} />
+                Identificar <ChevronRight size={17} />
               </Button>
             </div>
           )}
@@ -1047,10 +1047,10 @@ export function PrintFlowPage() {
           {/* RFID */}
           {identifyMethod === 'rfid' && (
             <div className="space-y-3">
-              <div className="flex items-center justify-center h-24 rounded-xl bg-gray-50 border-2 border-dashed border-gray-200">
+              <div className="flex items-center justify-center h-24 rounded-xl bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700">
                 <div className="text-center">
-                  <CreditCard size={28} className="text-gray-300 mx-auto mb-1" />
-                  <p className="text-[13px] text-gray-400">Aproxime o cartão ao leitor</p>
+                  <CreditCard size={28} className="text-gray-300 dark:text-gray-600 mx-auto mb-1" />
+                  <p className="text-[14px] text-gray-400 dark:text-gray-500">Aproxime o cartão ao leitor</p>
                 </div>
               </div>
               <input
@@ -1059,7 +1059,7 @@ export function PrintFlowPage() {
                 onChange={(e) => setCardHex(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && cardHex && identifyByRFID(cardHex)}
                 placeholder="Aguardando leitura..."
-                className="w-full px-3 py-2 text-[14px] border border-gray-200 rounded-xl outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
+                className="w-full px-3 py-2 text-[15px] border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:border-gray-400 dark:focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-700 bg-white/70 dark:bg-gray-900/70 text-gray-900 dark:text-white"
                 autoFocus
               />
             </div>
@@ -1081,14 +1081,14 @@ export function PrintFlowPage() {
                 {!cameraActive && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
                     <Spinner size="sm" />
-                    <span className="ml-2 text-white/80 text-[12px]">Iniciando câmera...</span>
+                    <span className="ml-2 text-white/80 text-[13px]">Iniciando câmera...</span>
                   </div>
                 )}
                 {cameraActive && (
                   <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none">
                     <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/35 backdrop-blur-sm rounded-full">
                       <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                      <span className="text-[11px] text-white/80 tracking-wide">
+                      <span className="text-[12px] text-white/80 tracking-wide">
                         {faceBox ? 'Rosto detectado' : 'Escaneando...'}
                       </span>
                     </div>
@@ -1096,7 +1096,7 @@ export function PrintFlowPage() {
                 )}
               </div>
               {identifying && (
-                <div className="flex items-center justify-center gap-2 text-[13px] text-gray-500">
+                <div className="flex items-center justify-center gap-2 text-[14px] text-gray-500 dark:text-gray-400">
                   <Spinner size="sm" />
                   Verificando...
                 </div>
@@ -1105,14 +1105,14 @@ export function PrintFlowPage() {
           )}
 
           {identifyMethod !== 'facial' && identifying && (
-            <div className="flex items-center justify-center gap-2 mt-3 text-[13px] text-gray-500">
+            <div className="flex items-center justify-center gap-2 mt-3 text-[14px] text-gray-500 dark:text-gray-400">
               <Spinner size="sm" />
               Identificando...
             </div>
           )}
 
           {identifyMethod !== 'facial' && identifyError && (
-            <p className="mt-3 text-[13px] text-red-500 animate-fadeIn">{identifyError}</p>
+            <p className="mt-3 text-[14px] text-red-500 animate-fadeIn">{identifyError}</p>
           )}
         </div>
       )}
@@ -1122,16 +1122,16 @@ export function PrintFlowPage() {
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => { setWasteSheets(''); setWasteError(''); setWasteModal('error'); }}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass-sm text-[13px] font-medium text-red-600 hover:bg-red-50/70 transition-colors"
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 shadow-glass-sm dark:shadow-glass-sm-dark text-[14px] font-medium text-red-600 hover:bg-red-50/70 dark:hover:bg-red-950/30 transition-colors"
           >
-            <AlertTriangle size={14} />
+            <AlertTriangle size={16} />
             Erro de impressão
           </button>
           <button
             onClick={() => { resetBlankModal(); setWasteModal('blank'); }}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 backdrop-blur-xl border border-white/60 shadow-glass-sm text-[13px] font-medium text-gray-600 hover:bg-gray-50/70 transition-colors"
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 shadow-glass-sm dark:shadow-glass-sm-dark text-[14px] font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors"
           >
-            <FileX size={14} />
+            <FileX size={16} />
             Folhas em branco
           </button>
         </div>
@@ -1140,24 +1140,24 @@ export function PrintFlowPage() {
       {/* ── Recent operations list (identify step only) ── */}
       {step === 'identify' && (
         <div className="space-y-2">
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-1">Últimas operações</p>
+          <p className="text-[12px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-widest px-1">Últimas operações</p>
 
           {recentLoading ? (
             <div className="flex justify-center py-6"><Spinner size="sm" /></div>
           ) : recentOps.length === 0 && todayWaste.events.length === 0 ? (
-            <p className="text-center text-[13px] text-gray-400 py-4">Nenhuma operação registrada ainda.</p>
+            <p className="text-center text-[14px] text-gray-400 dark:text-gray-500 py-4">Nenhuma operação registrada ainda.</p>
           ) : (
-            <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass divide-y divide-gray-100/60 overflow-hidden">
+            <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-2xl shadow-glass dark:shadow-glass-dark divide-y divide-gray-100/60 dark:divide-gray-800/40 overflow-hidden">
               {recentOps.map((op) => {
                 const hasBorrowed = op.entries.some((e) => e.type === 'borrowed');
                 const MethodIcon = METHOD_ICONS[op.identify_method] ?? Keyboard;
-                const badgeClass = METHOD_BADGE_CLASS[op.identify_method] ?? 'bg-gray-100 text-gray-500';
+                const badgeClass = METHOD_BADGE_CLASS[op.identify_method] ?? 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400';
                 const time = new Date(op.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                 return (
-                  <div key={op.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/40 transition-colors">
+                  <div key={op.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/40 dark:hover:bg-gray-800/30 transition-colors">
                     {/* Identify method badge with color */}
                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${badgeClass}`}>
-                      <MethodIcon size={13} />
+                      <MethodIcon size={15} />
                     </div>
 
                     {/* Student info — name is clickable */}
@@ -1166,11 +1166,11 @@ export function PrintFlowPage() {
                         onClick={() => openRecentDetail(op)}
                         className="text-left group"
                       >
-                        <p className="text-[13px] font-semibold text-gray-900 truncate leading-tight group-hover:text-blue-600 transition-colors">
+                        <p className="text-[14px] font-semibold text-gray-900 dark:text-white truncate leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                           {shortName(op.user_name ?? op.student_name ?? '')}
                         </p>
                       </button>
-                      <p className="text-[11px] text-gray-400 truncate leading-snug mt-0.5">
+                      <p className="text-[12px] text-gray-400 dark:text-gray-500 truncate leading-snug mt-0.5">
                         {op.user_identifier ?? op.registration_number ?? ''}
                         {op.user_detail ? ` · ${op.user_detail}` : (op.student_course ? ` · ${op.student_course}` : '')}
                         {!op.user_detail && op.student_period ? ` · ${op.student_period}` : ''}
@@ -1183,12 +1183,12 @@ export function PrintFlowPage() {
                     {/* Sheets + direction + time */}
                     <div className="flex flex-col items-end gap-0.5 shrink-0">
                       <div className="flex items-center gap-1">
-                        <ArrowDown size={12} className="text-emerald-500" />
-                        <span className="text-[13px] font-bold text-gray-900">{op.total_sheets}</span>
-                        <span className="text-[11px] text-gray-400">fls</span>
-                        {hasBorrowed && <ArrowUp size={12} className="text-amber-400" />}
+                        <ArrowDown size={14} className="text-emerald-500" />
+                        <span className="text-[14px] font-bold text-gray-900 dark:text-white">{op.total_sheets}</span>
+                        <span className="text-[12px] text-gray-400 dark:text-gray-500">fls</span>
+                        {hasBorrowed && <ArrowUp size={14} className="text-amber-400" />}
                       </div>
-                      <span className="text-[10px] text-gray-300">{time}</span>
+                      <span className="text-[11px] text-gray-300 dark:text-gray-600">{time}</span>
                     </div>
                   </div>
                 );
@@ -1197,27 +1197,27 @@ export function PrintFlowPage() {
               {/* Waste events */}
               {todayWaste.events.length > 0 && (
                 <>
-                  <div className={`px-4 py-2 bg-gray-50/40 ${recentOps.length > 0 ? 'border-t border-gray-100/60' : ''}`}>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Erros e folhas em branco</p>
+                  <div className={`px-4 py-2 bg-gray-50/40 dark:bg-gray-800/40 ${recentOps.length > 0 ? 'border-t border-gray-100/60 dark:border-gray-800/40' : ''}`}>
+                    <p className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Erros e folhas em branco</p>
                   </div>
                   {todayWaste.events.map((e) => (
                     <div key={`waste-${e.id}`} className="flex items-center gap-3 px-4 py-2.5">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${e.type === 'error' ? 'bg-red-50 text-red-400' : 'bg-gray-100 text-gray-400'}`}>
-                        {e.type === 'error' ? <AlertTriangle size={13} /> : <FileX size={13} />}
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${e.type === 'error' ? 'bg-red-50 dark:bg-red-950/40 text-red-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500'}`}>
+                        {e.type === 'error' ? <AlertTriangle size={15} /> : <FileX size={15} />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-semibold text-gray-700">
+                        <p className="text-[14px] font-semibold text-gray-700 dark:text-gray-200">
                           {e.type === 'error' ? 'Erro de impressão' : (e.user_name ? shortName(e.user_name) : 'Folhas em branco')}
                         </p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
+                        <p className="text-[12px] text-gray-400 dark:text-gray-500 mt-0.5">
                           {e.type === 'blank' && e.user_identifier ? `${e.user_identifier} · ` : ''}
                           {e.operator_login}
                           {e.type === 'blank' && e.user_type === 'employee' ? ' · Func.' : ''}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-0.5 shrink-0">
-                        <span className="text-[13px] font-bold text-gray-500">{e.sheets}</span>
-                        <span className="text-[10px] text-gray-300">{new Date(e.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[14px] font-bold text-gray-500 dark:text-gray-400">{e.sheets}</span>
+                        <span className="text-[11px] text-gray-300 dark:text-gray-600">{new Date(e.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                     </div>
                   ))}
@@ -1233,8 +1233,8 @@ export function PrintFlowPage() {
         <div className="space-y-4 animate-slideUp">
           <StudentCard result={identifyResult} />
 
-          <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-6">
-            <h2 className="text-[15px] font-semibold text-gray-900 mb-4">Quantidade de Folhas</h2>
+          <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-2xl shadow-glass dark:shadow-glass-dark p-6">
+            <h2 className="text-[16px] font-semibold text-gray-900 dark:text-white mb-4">Quantidade de Folhas</h2>
 
             <Input
               label="Folhas a imprimir"
@@ -1249,7 +1249,7 @@ export function PrintFlowPage() {
             />
 
             {identifyResult.available_balance === 0 && (
-              <p className="mt-2 text-[13px] text-amber-600">
+              <p className="mt-2 text-[14px] text-amber-600 dark:text-amber-400">
                 Saldo zerado — será necessário adicionar matrículas emprestadoras.
               </p>
             )}
@@ -1257,7 +1257,7 @@ export function PrintFlowPage() {
             {/* Loan students */}
             {loanStudents.length > 0 && (
               <div className="mt-4 space-y-2">
-                <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide">Emprestadores</p>
+                <p className="text-[13px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Emprestadores</p>
                 {loanStudents.map((l, i) => (
                   <div key={`${l.identify_result.user_type}-${l.identify_result.user.id}`} className="flex items-center gap-2">
                     <div className="flex-1">
@@ -1265,9 +1265,9 @@ export function PrintFlowPage() {
                     </div>
                     <button
                       onClick={() => setLoanStudents((prev) => prev.filter((_, j) => j !== i))}
-                      className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                      className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 ))}
@@ -1280,12 +1280,12 @@ export function PrintFlowPage() {
               const totalAvailable = (identifyResult?.available_balance ?? 0) + loanStudents.reduce((s, l) => s + l.identify_result.available_balance, 0);
               const shortage = Math.max(0, needed - totalAvailable);
               if (shortage > 0) return (
-                <p className="mt-3 text-[13px] text-amber-600">
+                <p className="mt-3 text-[14px] text-amber-600 dark:text-amber-400">
                   Faltam <strong>{shortage}</strong> folha{shortage !== 1 ? 's' : ''} — adicione matrículas emprestadoras.
                 </p>
               );
               return (
-                <p className="mt-3 text-[13px] text-emerald-600 font-medium">
+                <p className="mt-3 text-[14px] text-emerald-600 dark:text-emerald-400 font-medium">
                   Saldo suficiente para esta operação.
                 </p>
               );
@@ -1293,14 +1293,14 @@ export function PrintFlowPage() {
 
             <button
               onClick={() => setAddingLoan(true)}
-              className="mt-3 flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-700 transition-colors"
+              className="mt-3 flex items-center gap-1.5 text-[14px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
             >
-              <Plus size={14} />
-              <span className="font-mono text-[11px] text-gray-300 leading-none">(p)</span>
+              <Plus size={16} />
+              <span className="font-mono text-[12px] text-gray-300 dark:text-gray-600 leading-none">(p)</span>
               Adicionar matrícula emprestadora
             </button>
 
-            {stackError && <p className="mt-3 text-[13px] text-red-500">{stackError}</p>}
+            {stackError && <p className="mt-3 text-[14px] text-red-500">{stackError}</p>}
 
             <div className="flex gap-2 mt-5">
               <Button variant="secondary" onClick={reset} size="sm">Cancelar</Button>
@@ -1311,7 +1311,7 @@ export function PrintFlowPage() {
                 disabled={!sheets || parseInt(sheets) <= 0}
                 className="flex-1 justify-center"
               >
-                Avançar <ChevronRight size={15} />
+                Avançar <ChevronRight size={17} />
               </Button>
             </div>
           </div>
@@ -1321,24 +1321,24 @@ export function PrintFlowPage() {
       {/* ── Step: Final confirmation ── */}
       {step === 'confirm' && identifyResult && (
         <div className="space-y-4 animate-slideUp">
-          <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-6">
-            <h2 className="text-[15px] font-semibold text-gray-900 mb-4">Confirmar Impressão</h2>
+          <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-2xl shadow-glass dark:shadow-glass-dark p-6">
+            <h2 className="text-[16px] font-semibold text-gray-900 dark:text-white mb-4">Confirmar Impressão</h2>
 
             <div className="space-y-3 mb-5">
-              <div className="flex justify-between text-[14px]">
-                <span className="text-gray-500">{identifyResult.user_type === 'employee' ? 'Funcionário' : 'Aluno'}</span>
-                <span className="font-medium text-gray-900">{identifyResult.user.name}</span>
+              <div className="flex justify-between text-[15px]">
+                <span className="text-gray-500 dark:text-gray-400">{identifyResult.user_type === 'employee' ? 'Funcionário' : 'Aluno'}</span>
+                <span className="font-medium text-gray-900 dark:text-white">{identifyResult.user.name}</span>
               </div>
-              <div className="flex justify-between text-[14px]">
-                <span className="text-gray-500">Total de folhas</span>
-                <span className="font-bold text-gray-900">{sheets}</span>
+              <div className="flex justify-between text-[15px]">
+                <span className="text-gray-500 dark:text-gray-400">Total de folhas</span>
+                <span className="font-bold text-gray-900 dark:text-white">{sheets}</span>
               </div>
               {debits.length > 1 && (
-                <div className="pt-2 border-t border-gray-100">
-                  <p className="text-[12px] text-gray-500 mb-2">Distribuição:</p>
+                <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <p className="text-[13px] text-gray-500 dark:text-gray-400 mb-2">Distribuição:</p>
                   {debits.map((d) => (
-                    <div key={`${d.user_type}:${d.user_id}`} className="flex justify-between text-[13px] py-1">
-                      <span className="text-gray-600">{d.name} ({d.identifier}){d.user_type === 'employee' ? ' · Func.' : ''}</span>
+                    <div key={`${d.user_type}:${d.user_id}`} className="flex justify-between text-[14px] py-1">
+                      <span className="text-gray-600 dark:text-gray-300">{d.name} ({d.identifier}){d.user_type === 'employee' ? ' · Func.' : ''}</span>
                       <span className="font-medium">{d.sheets_to_debit} folhas</span>
                     </div>
                   ))}
@@ -1360,24 +1360,24 @@ export function PrintFlowPage() {
 
       {/* ── Step: Done ── */}
       {step === 'done' && (
-        <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl shadow-glass p-8 text-center animate-scaleIn">
-          <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-2xl shadow-glass dark:shadow-glass-dark p-8 text-center animate-scaleIn">
+          <div className="w-14 h-14 rounded-full bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-7 h-7 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-[17px] font-semibold text-gray-900">Impressão registrada</h2>
-          <p className="text-[13px] text-gray-500 mt-1">Operação #{doneOperationId}</p>
+          <h2 className="text-[18px] font-semibold text-gray-900 dark:text-white">Impressão registrada</h2>
+          <p className="text-[14px] text-gray-500 dark:text-gray-400 mt-1">Operação #{doneOperationId}</p>
           <Button onClick={reset} className="mt-6 mx-auto" autoFocus>
             Nova operação
           </Button>
-          <p className="text-[11px] text-gray-300 mt-3">
+          <p className="text-[12px] text-gray-300 dark:text-gray-600 mt-3">
             Voltando automaticamente em {doneCountdown}s
           </p>
           {/* Countdown progress bar */}
-          <div className="mt-2 mx-auto w-32 h-0.5 bg-gray-100 rounded-full overflow-hidden">
+          <div className="mt-2 mx-auto w-32 h-0.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gray-300 rounded-full transition-none"
+              className="h-full bg-gray-300 dark:bg-gray-600 rounded-full transition-none"
               style={{ width: `${(doneCountdown / 10) * 100}%` }}
             />
           </div>
@@ -1392,30 +1392,30 @@ export function PrintFlowPage() {
         size="sm"
       >
         {loanAddedMsg ? (
-          <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
-            <p className="text-[13px] text-emerald-700 font-medium">{loanAddedMsg}</p>
-            <p className="text-[12px] text-gray-500 mt-1">Identifique o próximo emprestador.</p>
+          <div className="mb-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800">
+            <p className="text-[14px] text-emerald-700 dark:text-emerald-400 font-medium">{loanAddedMsg}</p>
+            <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-1">Identifique o próximo emprestador.</p>
           </div>
         ) : (
-          <p className="text-[13px] text-gray-500 mb-4">
+          <p className="text-[14px] text-gray-500 dark:text-gray-400 mb-4">
             O emprestador deve estar fisicamente presente.
           </p>
         )}
 
         {/* Method tabs */}
-        <div className="flex gap-1 p-1 bg-gray-100/80 rounded-xl mb-4">
+        <div className="flex gap-1 p-1 bg-gray-100/80 dark:bg-gray-800/60 rounded-xl mb-4">
           {([
-            { key: 'manual', icon: <Keyboard size={14} />, label: 'Matrícula' },
-            { key: 'rfid',   icon: <CreditCard size={14} />, label: 'Carteirinha' },
-            { key: 'facial', icon: <Camera size={14} />, label: 'Facial' },
+            { key: 'manual', icon: <Keyboard size={16} />, label: 'Matrícula' },
+            { key: 'rfid',   icon: <CreditCard size={16} />, label: 'Carteirinha' },
+            { key: 'facial', icon: <Camera size={16} />, label: 'Facial' },
           ] as const).map((m) => (
             <button
               key={m.key}
               onClick={() => switchLoanMethod(m.key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[14px] font-medium transition-all duration-150 ${
                 loanIdentifyMethod === m.key
-                  ? 'bg-white shadow-sm text-gray-900'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
               }`}
             >
               {m.icon}
@@ -1450,10 +1450,10 @@ export function PrintFlowPage() {
         {/* RFID */}
         {loanIdentifyMethod === 'rfid' && (
           <>
-            <div className="flex items-center justify-center h-20 rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 mb-3">
+            <div className="flex items-center justify-center h-20 rounded-xl bg-gray-50 dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-700 mb-3">
               <div className="text-center">
-                <CreditCard size={24} className="text-gray-300 mx-auto mb-1" />
-                <p className="text-[12px] text-gray-400">Aproxime o cartão ao leitor</p>
+                <CreditCard size={24} className="text-gray-300 dark:text-gray-600 mx-auto mb-1" />
+                <p className="text-[13px] text-gray-400 dark:text-gray-500">Aproxime o cartão ao leitor</p>
               </div>
             </div>
             <input
@@ -1462,7 +1462,7 @@ export function PrintFlowPage() {
               onChange={(e) => { setLoanAddedMsg(''); setLoanCardHex(e.target.value); }}
               onKeyDown={(e) => e.key === 'Enter' && loanCardHex && addLoanByRFID()}
               placeholder="Código do cartão (hex)"
-              className="w-full px-3 py-2 text-[14px] border border-gray-200 rounded-xl outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
+              className="w-full px-3 py-2 text-[15px] border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:border-gray-400 dark:focus:border-gray-500 focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-700 bg-white/70 dark:bg-gray-900/70 text-gray-900 dark:text-white"
               autoFocus
             />
             <div className="flex gap-2 mt-4">
@@ -1490,14 +1490,14 @@ export function PrintFlowPage() {
               {!cameraActive && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
                   <Spinner size="sm" />
-                  <span className="ml-2 text-white/80 text-[12px]">Iniciando câmera...</span>
+                  <span className="ml-2 text-white/80 text-[13px]">Iniciando câmera...</span>
                 </div>
               )}
               {cameraActive && (
                 <div className="absolute bottom-2 inset-x-0 flex justify-center pointer-events-none">
                   <div className="flex items-center gap-1.5 px-2.5 py-1 bg-black/35 backdrop-blur-sm rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                    <span className="text-[11px] text-white/80 tracking-wide">
+                    <span className="text-[12px] text-white/80 tracking-wide">
                       {faceBox ? 'Rosto detectado' : 'Escaneando...'}
                     </span>
                   </div>
@@ -1505,7 +1505,7 @@ export function PrintFlowPage() {
               )}
             </div>
             {loanLoading && (
-              <div className="flex items-center justify-center gap-2 text-[13px] text-gray-500">
+              <div className="flex items-center justify-center gap-2 text-[14px] text-gray-500 dark:text-gray-400">
                 <Spinner size="sm" />
                 Verificando...
               </div>
@@ -1525,7 +1525,7 @@ export function PrintFlowPage() {
           setTimeout(() => loanRegistrationInputRef.current?.focus(), 50);
         }
       }} title="Atenção">
-        <p className="text-[14px] text-gray-700">{errorModal}</p>
+        <p className="text-[15px] text-gray-700 dark:text-gray-200">{errorModal}</p>
         <Button onClick={() => {
           setErrorModal('');
           if (addingLoan && loanIdentifyMethod === 'manual') {
@@ -1544,7 +1544,7 @@ export function PrintFlowPage() {
         title="Registrar Erro de Impressão"
         size="sm"
       >
-        <p className="text-[13px] text-gray-500 mb-4">
+        <p className="text-[14px] text-gray-500 dark:text-gray-400 mb-4">
           Registre folhas perdidas por falha, atolamento ou descarte durante a impressão. Essas folhas não são debitadas de nenhuma cota.
         </p>
         <Input
@@ -1568,7 +1568,7 @@ export function PrintFlowPage() {
           }}
           autoFocus
         />
-        {wasteError && <p className="text-[13px] text-red-500 mt-2">{wasteError}</p>}
+        {wasteError && <p className="text-[14px] text-red-500 mt-2">{wasteError}</p>}
         <div className="flex gap-2 mt-4">
           <Button variant="secondary" size="sm" onClick={() => setWasteModal(null)}>Cancelar</Button>
           <Button
@@ -1601,7 +1601,7 @@ export function PrintFlowPage() {
         {/* Step 1: Identify user */}
         {!blankIdentified && (
           <>
-            <p className="text-[13px] text-gray-500 mb-4">
+            <p className="text-[14px] text-gray-500 dark:text-gray-400 mb-4">
               Folhas em branco debitam a cota do solicitante. Informe a matrícula ou código do funcionário.
             </p>
             <Input
@@ -1630,7 +1630,7 @@ export function PrintFlowPage() {
               }}
               autoFocus
             />
-            {blankUserError && <p className="text-[13px] text-red-500 mt-2">{blankUserError}</p>}
+            {blankUserError && <p className="text-[14px] text-red-500 mt-2">{blankUserError}</p>}
             <div className="flex gap-2 mt-4">
               <Button variant="secondary" size="sm" onClick={resetBlankModal}>Cancelar</Button>
               <Button
@@ -1670,28 +1670,28 @@ export function PrintFlowPage() {
           return (
             <>
               {/* Primary user card */}
-              <div className="flex items-center gap-3 p-3 mb-3 rounded-2xl bg-gray-50/80 border border-gray-100">
+              <div className="flex items-center gap-3 p-3 mb-3 rounded-2xl bg-gray-50/80 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
                 {blankIdentified.photo ? (
                   <img src={`data:image/jpeg;base64,${blankIdentified.photo}`} alt={blankIdentified.user.name}
-                    className="w-10 h-10 rounded-xl object-cover border border-white/60 shadow-sm shrink-0" />
+                    className="w-10 h-10 rounded-xl object-cover border border-white/60 dark:border-white/10 shadow-sm shrink-0" />
                 ) : (
-                  <div className="w-10 h-10 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-base font-semibold shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 dark:text-gray-500 text-base font-semibold shrink-0">
                     {blankIdentified.user.name.charAt(0).toUpperCase()}
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-semibold text-gray-900 truncate">{blankIdentified.user.name}</p>
-                  <p className="text-[11px] text-gray-500 mt-0.5">{getUserIdentifier(blankIdentified.user, blankIdentified.user_type)}</p>
+                  <p className="text-[14px] font-semibold text-gray-900 dark:text-white truncate">{blankIdentified.user.name}</p>
+                  <p className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5">{getUserIdentifier(blankIdentified.user, blankIdentified.user_type)}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-[11px] text-gray-400">Saldo</p>
-                  <p className={`text-[13px] font-bold ${blankIdentified.available_balance === 0 ? 'text-red-500' : 'text-gray-900'}`}>
+                  <p className="text-[12px] text-gray-400 dark:text-gray-500">Saldo</p>
+                  <p className={`text-[14px] font-bold ${blankIdentified.available_balance === 0 ? 'text-red-500' : 'text-gray-900 dark:text-white'}`}>
                     {blankIdentified.available_balance} fls
                   </p>
                 </div>
                 <button onClick={() => { setBlankIdentified(null); setBlankLoanStudents([]); setBlankLoanDoc(''); setBlankLoanError(''); setBlankStackError(''); }}
-                  className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors shrink-0" title="Trocar usuário">
-                  <RefreshCw size={13} />
+                  className="p-1 rounded-lg text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0" title="Trocar usuário">
+                  <RefreshCw size={15} />
                 </button>
               </div>
 
@@ -1706,10 +1706,10 @@ export function PrintFlowPage() {
 
               {/* Balance feedback */}
               {needed > 0 && shortage === 0 && (
-                <p className="mt-2 text-[13px] text-emerald-600 font-medium">Saldo suficiente para esta operação.</p>
+                <p className="mt-2 text-[14px] text-emerald-600 dark:text-emerald-400 font-medium">Saldo suficiente para esta operação.</p>
               )}
               {needed > 0 && shortage > 0 && (
-                <p className="mt-2 text-[13px] text-amber-600">
+                <p className="mt-2 text-[14px] text-amber-600 dark:text-amber-400">
                   Faltam <strong>{shortage}</strong> folha{shortage !== 1 ? 's' : ''} — adicione matrículas emprestadoras.
                 </p>
               )}
@@ -1717,16 +1717,16 @@ export function PrintFlowPage() {
               {/* Loan students list */}
               {blankLoanStudents.length > 0 && (
                 <div className="mt-3 space-y-1.5">
-                  <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Emprestadores</p>
+                  <p className="text-[12px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Emprestadores</p>
                   {blankLoanStudents.map((l, i) => (
-                    <div key={`${l.user_type}-${l.user.id}`} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 border border-gray-100">
+                    <div key={`${l.user_type}-${l.user.id}`} className="flex items-center gap-2 p-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
                       <div className="flex-1 min-w-0">
-                        <p className="text-[12px] font-medium text-gray-800 truncate">{shortName(l.user.name)}</p>
-                        <p className="text-[11px] text-gray-400">{getUserIdentifier(l.user, l.user_type)} · {l.available_balance} fls</p>
+                        <p className="text-[13px] font-medium text-gray-800 dark:text-gray-100 truncate">{shortName(l.user.name)}</p>
+                        <p className="text-[12px] text-gray-400 dark:text-gray-500">{getUserIdentifier(l.user, l.user_type)} · {l.available_balance} fls</p>
                       </div>
                       <button onClick={() => setBlankLoanStudents(prev => prev.filter((_, j) => j !== i))}
-                        className="p-1 text-gray-400 hover:text-red-500 transition-colors shrink-0">
-                        <Trash2 size={13} />
+                        className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-500 transition-colors shrink-0">
+                        <Trash2 size={15} />
                       </button>
                     </div>
                   ))}
@@ -1746,12 +1746,12 @@ export function PrintFlowPage() {
                 </div>
                 <Button size="sm" variant="secondary" loading={blankLoanLoading} onClick={addBlankLoan}
                   className="mb-0 shrink-0" disabled={!blankLoanDoc.trim()}>
-                  <Plus size={14} />
+                  <Plus size={16} />
                 </Button>
               </div>
-              {blankLoanError && <p className="text-[12px] text-red-500 mt-1">{blankLoanError}</p>}
+              {blankLoanError && <p className="text-[13px] text-red-500 mt-1">{blankLoanError}</p>}
 
-              {blankStackError && <p className="mt-2 text-[13px] text-red-500">{blankStackError}</p>}
+              {blankStackError && <p className="mt-2 text-[14px] text-red-500">{blankStackError}</p>}
 
               <div className="flex gap-2 mt-4">
                 <Button variant="secondary" size="sm" onClick={resetBlankModal}>Cancelar</Button>
@@ -1761,7 +1761,7 @@ export function PrintFlowPage() {
                   disabled={!wasteSheets || parseInt(wasteSheets) < 1}
                   onClick={previewBlankDebits}
                 >
-                  Verificar <ChevronRight size={14} />
+                  Verificar <ChevronRight size={16} />
                 </Button>
               </div>
             </>
@@ -1771,31 +1771,31 @@ export function PrintFlowPage() {
         {/* Step 3: Debit breakdown + confirm */}
         {blankIdentified && blankDebits && (
           <>
-            <div className="space-y-2 mb-4 p-3 rounded-2xl bg-gray-50/80 border border-gray-100">
-              <div className="flex justify-between text-[13px]">
-                <span className="text-gray-500">Total de folhas</span>
-                <span className="font-bold text-gray-900">{wasteSheets}</span>
+            <div className="space-y-2 mb-4 p-3 rounded-2xl bg-gray-50/80 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
+              <div className="flex justify-between text-[14px]">
+                <span className="text-gray-500 dark:text-gray-400">Total de folhas</span>
+                <span className="font-bold text-gray-900 dark:text-white">{wasteSheets}</span>
               </div>
               {blankDebits.length > 1 && (
-                <div className="pt-2 border-t border-gray-100 space-y-1">
-                  <p className="text-[11px] text-gray-400 uppercase tracking-wide">Distribuição</p>
+                <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-1">
+                  <p className="text-[12px] text-gray-400 dark:text-gray-500 uppercase tracking-wide">Distribuição</p>
                   {blankDebits.map((d) => (
-                    <div key={`${d.user_type}:${d.user_id}`} className="flex justify-between text-[12px]">
-                      <span className="text-gray-600">{shortName(d.name)} ({d.identifier}){d.user_type === 'employee' ? ' · Func.' : ''}</span>
-                      <span className="font-medium text-gray-800">{d.sheets_to_debit} fls</span>
+                    <div key={`${d.user_type}:${d.user_id}`} className="flex justify-between text-[13px]">
+                      <span className="text-gray-600 dark:text-gray-300">{shortName(d.name)} ({d.identifier}){d.user_type === 'employee' ? ' · Func.' : ''}</span>
+                      <span className="font-medium text-gray-800 dark:text-gray-100">{d.sheets_to_debit} fls</span>
                     </div>
                   ))}
                 </div>
               )}
               {blankDebits.length === 1 && (
-                <div className="flex justify-between text-[13px]">
-                  <span className="text-gray-500">{blankIdentified.user_type === 'employee' ? 'Funcionário' : 'Aluno'}</span>
-                  <span className="font-medium text-gray-900">{shortName(blankIdentified.user.name)}</span>
+                <div className="flex justify-between text-[14px]">
+                  <span className="text-gray-500 dark:text-gray-400">{blankIdentified.user_type === 'employee' ? 'Funcionário' : 'Aluno'}</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{shortName(blankIdentified.user.name)}</span>
                 </div>
               )}
             </div>
 
-            {wasteError && <p className="text-[13px] text-red-500 mb-3">{wasteError}</p>}
+            {wasteError && <p className="text-[14px] text-red-500 mb-3">{wasteError}</p>}
 
             <div className="flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => { setBlankDebits(null); setWasteError(''); }}>Voltar</Button>
@@ -1825,32 +1825,32 @@ export function PrintFlowPage() {
                   <img
                     src={`data:image/jpeg;base64,${recentStudentDetail.photo}`}
                     alt={recentStudentDetail.user.name}
-                    className="w-16 h-16 rounded-xl object-cover border border-white/60 shadow-sm"
+                    className="w-16 h-16 rounded-xl object-cover border border-white/60 dark:border-white/10 shadow-sm"
                   />
                 ) : recentStudentDetail.user_type === 'employee' ? (
-                  <div className="w-16 h-16 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-400">
+                  <div className="w-16 h-16 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-blue-400">
                     <Briefcase size={24} />
                   </div>
                 ) : (
-                  <div className="w-16 h-16 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 text-xl font-semibold">
+                  <div className="w-16 h-16 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-400 dark:text-gray-500 text-xl font-semibold">
                     {recentStudentDetail.user.name.charAt(0).toUpperCase()}
                   </div>
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <p className="text-[15px] font-semibold text-gray-900">{recentStudentDetail.user.name}</p>
+                  <p className="text-[16px] font-semibold text-gray-900 dark:text-white">{recentStudentDetail.user.name}</p>
                   {recentStudentDetail.user_type === 'employee' && (
-                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">Funcionário</span>
+                    <span className="shrink-0 text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900">Funcionário</span>
                   )}
                 </div>
-                <p className="text-[12px] text-gray-500 mt-0.5">{getUserIdentifier(recentStudentDetail.user, recentStudentDetail.user_type)}</p>
+                <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-0.5">{getUserIdentifier(recentStudentDetail.user, recentStudentDetail.user_type)}</p>
                 {(() => {
                   const detail = getUserDetail(recentStudentDetail.user, recentStudentDetail.user_type);
-                  return detail ? <p className="text-[12px] text-gray-500">{detail}</p> : null;
+                  return detail ? <p className="text-[13px] text-gray-500 dark:text-gray-400">{detail}</p> : null;
                 })()}
                 {recentStudentDetail.user.sync_status !== 'synced' && (
-                  <span className="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                  <span className="inline-block mt-1 text-[12px] px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
                     {SYNC_STATUS_LABELS[recentStudentDetail.user.sync_status]}
                   </span>
                 )}
@@ -1866,15 +1866,15 @@ export function PrintFlowPage() {
               return (
                 <div className="grid grid-cols-4 gap-2">
                   {[
-                    { label: 'Total impresso', value: totalPrintedToday, icon: <Printer size={13} />, color: 'text-gray-700' },
-                    { label: 'Cota própria', value: ownSheetsTotal, icon: <Clock size={13} />, color: 'text-blue-600' },
-                    { label: 'Emp. recebido', value: receivedTotal, icon: <TrendingDown size={13} />, color: 'text-amber-600' },
-                    { label: 'Cota cedida', value: lentTotal, icon: <TrendingUp size={13} />, color: 'text-emerald-600' },
+                    { label: 'Total impresso', value: totalPrintedToday, icon: <Printer size={15} />, color: 'text-gray-700 dark:text-gray-200' },
+                    { label: 'Cota própria', value: ownSheetsTotal, icon: <Clock size={15} />, color: 'text-blue-600' },
+                    { label: 'Emp. recebido', value: receivedTotal, icon: <TrendingDown size={15} />, color: 'text-amber-600' },
+                    { label: 'Cota cedida', value: lentTotal, icon: <TrendingUp size={15} />, color: 'text-emerald-600' },
                   ].map((item) => (
-                    <div key={item.label} className="flex flex-col items-center p-3 bg-gray-50/80 rounded-xl border border-gray-100">
+                    <div key={item.label} className="flex flex-col items-center p-3 bg-gray-50/80 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
                       <span className={`${item.color} mb-1`}>{item.icon}</span>
-                      <p className={`text-[18px] font-bold ${item.color}`}>{item.value}</p>
-                      <p className="text-[10px] text-gray-500 text-center leading-tight mt-0.5">{item.label}</p>
+                      <p className={`text-[20px] font-bold ${item.color}`}>{item.value}</p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center leading-tight mt-0.5">{item.label}</p>
                     </div>
                   ))}
                 </div>
@@ -1888,28 +1888,28 @@ export function PrintFlowPage() {
               const pagedOps = recentFullHistory.as_primary.slice((safeOpsPage - 1) * 5, safeOpsPage * 5);
               return (
                 <div>
-                  <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Operações realizadas hoje</p>
+                  <p className="text-[13px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Operações realizadas hoje</p>
                   <div className="space-y-2">
                     {pagedOps.map((op) => (
-                      <div key={op.id} className="rounded-xl border border-gray-100 overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-2 bg-gray-50/70 border-b border-gray-100">
-                          <span className="text-[12px] text-gray-500">Op. #{op.id} · {formatModalTime(op.created_at)} · {op.operator_login}</span>
-                          <span className="text-[13px] font-bold text-gray-900">{op.total_sheets} folhas</span>
+                      <div key={op.id} className="rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2 bg-gray-50/70 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                          <span className="text-[13px] text-gray-500 dark:text-gray-400">Op. #{op.id} · {formatModalTime(op.created_at)} · {op.operator_login}</span>
+                          <span className="text-[14px] font-bold text-gray-900 dark:text-white">{op.total_sheets} folhas</span>
                         </div>
                         {op.entries.map((e) => {
                           const isOwn = e.user_id === selectedRecent?.id && e.user_type === selectedRecent?.user_type;
                           const displayName = shortName(e.user_name ?? e.student_name ?? '');
                           return (
-                            <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                            <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60 dark:bg-gray-900/60">
                               <div className="flex items-center gap-2">
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${isOwn ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                                <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${isOwn ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400' : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'}`}>
                                   {isOwn ? 'Própria' : 'Empréstimo'}
                                 </span>
                                 {!isOwn && (
-                                  <p className="text-[12px] font-medium text-gray-800 leading-tight">{displayName}</p>
+                                  <p className="text-[13px] font-medium text-gray-800 dark:text-gray-100 leading-tight">{displayName}</p>
                                 )}
                               </div>
-                              <span className="text-[13px] font-semibold text-gray-900 shrink-0">{e.sheets} folhas</span>
+                              <span className="text-[14px] font-semibold text-gray-900 dark:text-white shrink-0">{e.sheets} folhas</span>
                             </div>
                           );
                         })}
@@ -1917,17 +1917,17 @@ export function PrintFlowPage() {
                     ))}
                   </div>
                   {totalOpsPages > 1 && (
-                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
-                      <p className="text-[11px] text-gray-400">
+                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+                      <p className="text-[12px] text-gray-400 dark:text-gray-500">
                         {(safeOpsPage - 1) * 5 + 1}–{Math.min(safeOpsPage * 5, recentFullHistory.as_primary.length)} de {recentFullHistory.as_primary.length}
                       </p>
                       <div className="flex gap-1">
                         <button onClick={() => setRecentModalOpsPage(Math.max(1, safeOpsPage - 1))} disabled={safeOpsPage === 1}
-                          className="px-2 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                          className="px-2 py-1 text-[12px] font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
                           Anterior
                         </button>
                         <button onClick={() => setRecentModalOpsPage(Math.min(totalOpsPages, safeOpsPage + 1))} disabled={safeOpsPage === totalOpsPages}
-                          className="px-2 py-1 text-[11px] font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                          className="px-2 py-1 text-[12px] font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
                           Próxima
                         </button>
                       </div>
@@ -1940,15 +1940,15 @@ export function PrintFlowPage() {
             {/* Loans given */}
             {recentFullHistory.as_lender.length > 0 && (
               <div>
-                <p className="text-[12px] font-medium text-gray-500 uppercase tracking-wide mb-2">Cota cedida a outros usuários</p>
-                <div className="rounded-xl border border-gray-100 overflow-hidden divide-y divide-gray-100">
+                <p className="text-[13px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Cota cedida a outros usuários</p>
+                <div className="rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden divide-y divide-gray-100 dark:divide-gray-800">
                   {recentFullHistory.as_lender.map((e) => (
-                    <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60">
+                    <div key={e.id} className="flex items-center justify-between px-4 py-2.5 bg-white/60 dark:bg-gray-900/60">
                       <div>
-                        <p className="text-[13px] font-medium text-gray-900">{e.primary_user_name ?? e.primary_student_name}</p>
-                        <p className="text-[11px] text-gray-400">{e.primary_user_identifier ?? e.primary_registration} · op. #{e.operation_id}</p>
+                        <p className="text-[14px] font-medium text-gray-900 dark:text-white">{e.primary_user_name ?? e.primary_student_name}</p>
+                        <p className="text-[12px] text-gray-400 dark:text-gray-500">{e.primary_user_identifier ?? e.primary_registration} · op. #{e.operation_id}</p>
                       </div>
-                      <span className="text-[13px] font-bold text-emerald-700">{e.sheets} folhas</span>
+                      <span className="text-[14px] font-bold text-emerald-700 dark:text-emerald-400">{e.sheets} folhas</span>
                     </div>
                   ))}
                 </div>
@@ -1965,10 +1965,10 @@ export function PrintFlowPage() {
         title="Matrícula não encontrada no Lyceum"
         size="sm"
       >
-        <p className="text-[14px] text-gray-700">
+        <p className="text-[15px] text-gray-700 dark:text-gray-200">
           A matrícula <strong>{notInLyceumModal?.registration_number}</strong> não foi encontrada no Lyceum.
         </p>
-        <p className="text-[13px] text-gray-500 mt-1">
+        <p className="text-[14px] text-gray-500 dark:text-gray-400 mt-1">
           Deseja prosseguir mesmo assim? O registro será criado em modo de contingência.
         </p>
         <div className="flex gap-2 mt-5">
