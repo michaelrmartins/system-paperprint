@@ -280,12 +280,18 @@ export async function registerBlankWaste(
 }
 
 export async function adjustEntry(entryId: number, newSheets: number, operatorId: number, reason: string) {
-  const entry = await db('entries').where('id', entryId).first();
-  if (!entry) throw new Error('ENTRY_NOT_FOUND');
-
   await db.transaction(async (trx) => {
+    const entry = await trx('entries').where('id', entryId).forUpdate().first();
+    if (!entry) throw new Error('ENTRY_NOT_FOUND');
+
     const previousValue = entry.sheets;
+    const delta = newSheets - previousValue;
     await trx('entries').where('id', entryId).update({ sheets: newSheets });
+    if (delta !== 0 && entry.print_operation_id) {
+      await trx('print_operations')
+        .where('id', entry.print_operation_id)
+        .update({ total_sheets: trx.raw('total_sheets + ?', [delta]) });
+    }
     await trx('audit_log').insert({
       entry_id: entryId,
       operator_id: operatorId,
@@ -293,6 +299,6 @@ export async function adjustEntry(entryId: number, newSheets: number, operatorId
       new_value: newSheets,
       reason,
     });
-    logger.info({ entry_id: entryId, previous_value: previousValue, new_value: newSheets }, 'Entry adjusted');
+    logger.info({ entry_id: entryId, previous_value: previousValue, new_value: newSheets, delta }, 'Entry adjusted');
   });
 }

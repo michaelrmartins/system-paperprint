@@ -60,20 +60,27 @@ export async function wasteRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'MISSING_FIELDS' });
     }
 
-    const event = await db('print_waste').where('id', id).first();
-    if (!event) return reply.status(404).send({ error: 'NOT_FOUND' });
+    try {
+      await db.transaction(async (trx) => {
+        const event = await trx('print_waste').where('id', id).forUpdate().first();
+        if (!event) throw new Error('NOT_FOUND');
 
-    await db.transaction(async (trx) => {
-      await trx('print_waste').where('id', id).update({ sheets });
-      await trx('audit_log').insert({
-        waste_id: parseInt(id),
-        operator_id: operator.sub,
-        previous_value: event.sheets,
-        new_value: sheets,
-        reason: reason.trim(),
+        await trx('print_waste').where('id', id).update({ sheets });
+        await trx('audit_log').insert({
+          waste_id: parseInt(id),
+          operator_id: operator.sub,
+          previous_value: event.sheets,
+          new_value: sheets,
+          reason: reason.trim(),
+        });
+        logger.info({ waste_id: id, previous_value: event.sheets, new_value: sheets }, 'Waste record adjusted');
       });
-      logger.info({ waste_id: id, previous_value: event.sheets, new_value: sheets }, 'Waste record adjusted');
-    });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message === 'NOT_FOUND') {
+        return reply.status(404).send({ error: 'NOT_FOUND' });
+      }
+      throw err;
+    }
 
     return { ok: true };
   });
