@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../lib/api';
 
 interface PrinterData {
@@ -11,6 +11,57 @@ interface PrinterData {
 }
 
 const POLL_MS = 30_000;
+
+// Slot-machine roll-up for a single character when its value changes
+function SlotDigit({ char }: { char: string }) {
+  const [animState, setAnimState] = useState({ key: 0, from: char, to: char });
+  const prevRef = useRef(char);
+
+  useEffect(() => {
+    if (char !== prevRef.current) {
+      const from = prevRef.current;
+      prevRef.current = char;
+      setAnimState(s => ({ key: s.key + 1, from, to: char }));
+    }
+  }, [char]);
+
+  const animating = animState.key > 0;
+  const topChar = animating ? animState.from : char;
+  const bottomChar = animating ? animState.to : char;
+
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        overflow: 'hidden',
+        height: '1em',
+        lineHeight: 1,
+        verticalAlign: '-0.1em',
+      }}
+    >
+      <span
+        key={animState.key}
+        style={{
+          display: 'block',
+          animation: animating ? 'slot-roll-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards' : undefined,
+        }}
+      >
+        <span style={{ display: 'block', height: '1em', lineHeight: 1 }}>{topChar}</span>
+        <span style={{ display: 'block', height: '1em', lineHeight: 1 }}>{bottomChar}</span>
+      </span>
+    </span>
+  );
+}
+
+function SlotNumber({ value }: { value: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', fontVariantNumeric: 'tabular-nums' }}>
+      {Array.from(value).map((char, i) => (
+        <SlotDigit key={i} char={char} />
+      ))}
+    </span>
+  );
+}
 
 function tonerColor(pct: number) {
   if (pct < 15) return { bar: 'bg-red-500',    text: 'text-red-500' };
@@ -37,8 +88,17 @@ function TonerBar({ value }: { value: number }) {
   );
 }
 
+type Increment = { value: number; visible: boolean; key: number };
+const INCREMENT_HIDE_MS = 30_000;
+const INCREMENT_FADE_MS = 400;
+
 export function PrinterWidget() {
   const [data, setData] = useState<PrinterData | null>(null);
+  const [increment, setIncrement] = useState<Increment | null>(null);
+  const prevPagesNumRef = useRef<number | null>(null);
+  const incrementKeyRef = useRef(0);
+  const fadeTimerRef = useRef<number | null>(null);
+  const removeTimerRef = useRef<number | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -54,6 +114,39 @@ export function PrinterWidget() {
     const id = setInterval(fetchData, POLL_MS);
     return () => clearInterval(id);
   }, [fetchData]);
+
+  useEffect(() => {
+    if (data?.pages == null) return;
+    const num = parseInt(data.pages.replace(/\D/g, ''), 10);
+    if (Number.isNaN(num)) return;
+
+    const prev = prevPagesNumRef.current;
+    prevPagesNumRef.current = num;
+
+    if (prev != null && num > prev) {
+      const delta = num - prev;
+      incrementKeyRef.current += 1;
+      const key = incrementKeyRef.current;
+
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+
+      setIncrement({ value: delta, visible: true, key });
+
+      fadeTimerRef.current = window.setTimeout(() => {
+        setIncrement(curr => (curr ? { ...curr, visible: false } : null));
+      }, INCREMENT_HIDE_MS);
+
+      removeTimerRef.current = window.setTimeout(() => {
+        setIncrement(null);
+      }, INCREMENT_HIDE_MS + INCREMENT_FADE_MS);
+    }
+  }, [data?.pages]);
+
+  useEffect(() => () => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
+  }, []);
 
   if (!data || !data.configured) return null;
 
@@ -78,7 +171,25 @@ export function PrinterWidget() {
       {data.pages != null && (
         <div className="flex items-baseline justify-between">
           <span className="text-[11px] text-gray-400 dark:text-gray-500">Páginas</span>
-          <span className="text-[12px] font-semibold text-gray-700 dark:text-gray-300">{data.pages}</span>
+          <span className="text-[12px] font-semibold text-gray-700 dark:text-gray-300">
+            <SlotNumber value={data.pages} />
+            {increment && (
+              <span
+                key={increment.key}
+                className="ml-1.5 text-[10px] font-semibold text-emerald-500 dark:text-emerald-400"
+                style={{
+                  display: 'inline-block',
+                  opacity: increment.visible ? 1 : 0,
+                  transition: `opacity ${INCREMENT_FADE_MS}ms ease-out`,
+                  animation: increment.visible
+                    ? `badge-pop ${INCREMENT_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both`
+                    : 'none',
+                }}
+              >
+                +{increment.value}
+              </span>
+            )}
+          </span>
         </div>
       )}
 
