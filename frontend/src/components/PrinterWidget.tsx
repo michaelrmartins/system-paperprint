@@ -89,8 +89,9 @@ function TonerBar({ value }: { value: number }) {
 }
 
 type Increment = { value: number; visible: boolean; key: number };
-const INCREMENT_HIDE_MS = 30_000;
-const INCREMENT_FADE_MS = 400;
+const INCREMENT_HIDE_MS = 60_000;
+const INCREMENT_FADE_MS = 3200;
+const INCREMENT_POP_MS = 800;
 
 export function PrinterWidget() {
   const [data, setData] = useState<PrinterData | null>(null);
@@ -125,13 +126,15 @@ export function PrinterWidget() {
 
     if (prev != null && num > prev) {
       const delta = num - prev;
-      incrementKeyRef.current += 1;
-      const key = incrementKeyRef.current;
 
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       if (removeTimerRef.current) clearTimeout(removeTimerRef.current);
 
-      setIncrement({ value: delta, visible: true, key });
+      setIncrement(curr => {
+        const accumulated = curr && curr.visible ? curr.value + delta : delta;
+        incrementKeyRef.current += 1;
+        return { value: accumulated, visible: true, key: incrementKeyRef.current };
+      });
 
       fadeTimerRef.current = window.setTimeout(() => {
         setIncrement(curr => (curr ? { ...curr, visible: false } : null));
@@ -172,23 +175,23 @@ export function PrinterWidget() {
         <div className="flex items-baseline justify-between">
           <span className="text-[11px] text-gray-400 dark:text-gray-500">Páginas</span>
           <span className="text-[12px] font-semibold text-gray-700 dark:text-gray-300">
-            <SlotNumber value={data.pages} />
             {increment && (
               <span
                 key={increment.key}
-                className="ml-1.5 text-[10px] font-semibold text-emerald-500 dark:text-emerald-400"
+                className="mr-1.5 text-[12px] font-semibold text-emerald-500 dark:text-emerald-400"
                 style={{
                   display: 'inline-block',
                   opacity: increment.visible ? 1 : 0,
                   transition: `opacity ${INCREMENT_FADE_MS}ms ease-out`,
                   animation: increment.visible
-                    ? `badge-pop ${INCREMENT_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both`
+                    ? `badge-pop ${INCREMENT_POP_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both`
                     : 'none',
                 }}
               >
-                +{increment.value}
+                (+{increment.value})
               </span>
             )}
+            <SlotNumber value={data.pages} />
           </span>
         </div>
       )}
