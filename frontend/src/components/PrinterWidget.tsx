@@ -89,8 +89,8 @@ function TonerBar({ value }: { value: number }) {
 }
 
 type Increment = { value: number; visible: boolean; key: number };
-const INCREMENT_HIDE_MS = 60_000;
-const INCREMENT_FADE_MS = 3200;
+const INCREMENT_HIDE_MS = 120_000;
+const INCREMENT_FADE_MS = 5600;
 const INCREMENT_POP_MS = 800;
 
 export function PrinterWidget() {
